@@ -564,12 +564,9 @@ class CanvasView(QGraphicsView):
                 event.accept()
                 return
 
-            # UX Feedback: Clicking outside of selected shapes automatically merges them to raster layer!
+            # Clicking outside of selected shapes deselects them without auto-rasterizing
             if selected_shapes and not hit_shape_body and not hit_handle:
-                for s_item in list(selected_shapes):
-                    self.merge_shape_to_raster(s_item.shape_data.id)
-                self.status_message.emit(I18N.tr("status_shape_merged"))
-                self.canvas_modified.emit()
+                self.scene.clearSelection()
 
             self.input_safety.set_mouse_down(True)
             self.drag_start_pt = scene_pt

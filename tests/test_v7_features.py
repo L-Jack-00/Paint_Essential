@@ -220,8 +220,9 @@ class TestV7Features(unittest.TestCase):
         )
         self.cv.mousePressEvent(click_outside)
 
-        # Shape should be automatically baked to raster
-        self.assertEqual(len(shape_layer.shapes), 0)
+        # Shape should NOT be automatically baked to raster - remains in shape layer!
+        self.assertEqual(len(shape_layer.shapes), 1)
+        self.assertEqual(len(self.cv.scene.selectedItems()), 0)
 
     def test_shape_double_click_merge(self):
         self.cv._commit_shape(QPointF(10, 10), QPointF(50, 50), InputMode.SHAPE_RECT)
