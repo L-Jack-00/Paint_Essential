@@ -1,0 +1,117 @@
+"""
+Paint Pro - Standalone Executable Packaging & Sanitization Script
+LJack Protocol Pillar 7: Release Sanitization & Zero-cruft Packaging
+"""
+import subprocess
+import sys
+import shutil
+import os
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+
+def run_tests():
+    print("[1/3] Running Headless Test Suite...")
+    result = subprocess.run([sys.executable, "-m", "unittest", "discover", "tests"], capture_output=True, text=True)
+    if result.returncode != 0:
+        print("❌ Test failure detected! Packaging aborted.")
+        print(result.stdout)
+        print(result.stderr)
+        sys.exit(1)
+    print("  ✔️ All unit tests passed with 0 defects.")
+
+
+def clean_artifacts():
+    print("[2/3] Cleaning temporary build artifacts...")
+    for folder in ["build", "dist", "__pycache__"]:
+        if os.path.exists(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+    for root, dirs, files in os.walk("."):
+        for f in files:
+            if f.endswith((".spec", ".pyc", ".tmp", ".log")):
+                try:
+                    os.remove(os.path.join(root, f))
+                except Exception:
+                    pass
+    print("  ✔️ Cleaned.")
+
+
+def package_exe():
+    print("[3/3] Compiling portable release via PyInstaller with isolated data directory...")
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--name=Paint Essential",
+        "--windowed",
+        "--onedir",
+        "--clean",
+        "--icon=ui/assets/app_icon.ico",
+        "--add-data=ui/assets;ui/assets",
+        "run.py"
+    ]
+    result = subprocess.run(cmd)
+    if result.returncode == 0:
+        dist_src = os.path.join("dist", "Paint Essential")
+        portable_dir = os.path.join("dist", "PaintEssential_v1.2.0_Portable")
+        if os.path.exists(portable_dir):
+            shutil.rmtree(portable_dir, ignore_errors=True)
+        shutil.copytree(dist_src, portable_dir)
+
+        readme_path = os.path.join(portable_dir, "README.txt")
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(
+                "============================================================\n"
+                "  🎨 Paint Essential (페인트 에센셜) v1.2.0\n"
+                "============================================================\n\n"
+                "• 제작 및 개발: L.Jack with Google Antigravity\n"
+                "• 그래픽 엔진: Paint Essential Core Engine v1.2.0\n"
+                "• 지원 환경: Windows 10 / 11 (64-bit)\n\n"
+                "[ v1.2.0 신규 기능 안내 ]\n"
+                "1. 스마트 도구 옵션 바:\n"
+                "   - 순서 배지 (단축키 K): 시작 번호 설정 및 숫자/영문 대소문자 스타일 지원\n"
+                "   - 모자이크 (단축키 J): 원하는 블록 크기(4~64px)를 자유롭게 조절하여 적용\n"
+                "   - 둥근 사각형 (단축키 U): 모서리 곡률(2~64px)을 수치로 정밀하게 조절\n"
+                "   - 페인트통 (G): 투명 영역 채우기 허용 범위 (0~100%)\n"
+                "   - 마술봉 (W): 유사 색상 선택 허용 범위 (0~255)\n\n"
+                "2. 확장 도구 모음:\n"
+                "   - 사각형 도구 (단축키 U): 일반 직사각형 / 둥근 직사각형 전환 지원\n"
+                "   - 화살표 도구 (단축키 A): 단방향/양방향 직선 및 곡선 화살표 지원\n"
+                "   - 버튼 우클릭 또는 길게 누르면 서브 도구 선택 메뉴가 표시됩니다.\n\n"
+                "3. 편리한 복사 안내 알림:\n"
+                "   - 복사(Ctrl+C), 투명 PNG 복사(Ctrl+Shift+C), 잘라내기(Ctrl+X) 시\n"
+                "     화면 상단에 작업을 방해하지 않는 깔끔한 안내 알림이 표시됩니다.\n\n"
+                "[ 실행 방법 ]\n"
+                "- 'Paint Essential.exe' 파일을 더블 클릭하여 바로 실행할 수 있습니다.\n"
+                "- 별도의 설치 과정이 필요 없는 가볍고 빠른 무설치(포터블) 프로그램입니다.\n\n"
+                "[ 파일 안내 ]\n"
+                "- '_internal' 폴더는 프로그램 구동에 필요한 파일들이 보관된 폴더입니다.\n"
+                "  삭제하거나 이동하지 마세요.\n"
+            )
+
+        # Create zip archive
+        import zipfile
+        zip_path = os.path.join("dist", "PaintEssential_v1.2.0_Portable.zip")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(portable_dir):
+                for file in files:
+                    full_p = os.path.join(root, file)
+                    rel_p = os.path.relpath(full_p, "dist")
+                    zipf.write(full_p, rel_p)
+
+        exe_path = os.path.abspath(os.path.join(portable_dir, "Paint Essential.exe"))
+        print(f"\n🎉 Packaging Complete!")
+        print(f"👉 Portable Folder: {os.path.abspath(portable_dir)}")
+        print(f"👉 Standalone Executable: {exe_path}")
+        print(f"👉 Release ZIP: {os.path.abspath(zip_path)}")
+    else:
+        print("❌ PyInstaller compilation failed.")
+
+
+if __name__ == "__main__":
+    run_tests()
+    clean_artifacts()
+    package_exe()
