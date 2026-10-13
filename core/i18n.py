@@ -565,6 +565,13 @@ class I18N:
         },
         "patch_notes_content": {
             "ko": (
+                "🛠️ [ Paint Essential v1.2.1 마이너 패치 안내 ]\n\n"
+                "• 도형 자동 래스터라이즈(병합) 버그 수정:\n"
+                "  - 도형 크기/위치 조절 후 바깥 영역 클릭 시 레이어에 강제 병합되던 현상 해결\n"
+                "  - 도형은 계속 독립된 벡터 레이어로 유지되며, Enter/더블클릭/메뉴로만 명시적 병합\n"
+                "• 다크 모드 스크롤바 가시성 개선:\n"
+                "  - 다크 모드 환경에서 스크롤바가 눈에 잘 띄도록 소프트 스카이 블루(#60a5fa) 스타일 적용\n\n"
+                "--------------------------------------------------\n"
                 "🎉 [ Paint Essential v1.2.0 업데이트 안내 ]\n\n"
                 "더욱 직관적이고 편리한 그래픽 편집을 위해 새로운 도구와 편의 기능을 선보입니다.\n\n"
                 "✨ 주요 새로운 기능 (v1.2.0):\n"
@@ -589,6 +596,13 @@ class I18N:
                 "• 고해상도 디스플레이 완벽 지원 및 다크 모드/라이트 모드 지원"
             ),
             "en": (
+                "🛠️ [ Paint Essential v1.2.1 Minor Patch Notes ]\n\n"
+                "• Fixed Shape Auto-Rasterize Issue:\n"
+                "  - Shapes no longer auto-merge to raster layer when clicking outside\n"
+                "  - Shapes remain as independent vector layers and only merge via Enter/Double-click/Menu\n"
+                "• Enhanced Dark Mode Scrollbar Visibility:\n"
+                "  - Soft sky blue (#60a5fa) scrollbar styling with responsive hover & pressed feedback\n\n"
+                "--------------------------------------------------\n"
                 "🎉 [ Paint Essential v1.2.0 Release Notes ]\n\n"
                 "Introducing new tools and workflow enhancements for a smoother creative experience.\n\n"
                 "✨ Highlights in v1.2.0:\n"

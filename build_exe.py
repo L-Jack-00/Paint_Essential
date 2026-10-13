@@ -54,7 +54,7 @@ def package_exe():
     result = subprocess.run(cmd)
     if result.returncode == 0:
         dist_src = os.path.join("dist", "Paint Essential")
-        portable_dir = os.path.join("dist", "PaintEssential_v1.2.0_Portable")
+        portable_dir = os.path.join("dist", "PaintEssential_v1.2.1_Portable")
         if os.path.exists(portable_dir):
             shutil.rmtree(portable_dir, ignore_errors=True)
         shutil.copytree(dist_src, portable_dir)
@@ -63,11 +63,17 @@ def package_exe():
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(
                 "============================================================\n"
-                "  🎨 Paint Essential (페인트 에센셜) v1.2.0\n"
+                "  🎨 Paint Essential (페인트 에센셜) v1.2.1\n"
                 "============================================================\n\n"
                 "• 제작 및 개발: L.Jack with Google Antigravity\n"
-                "• 그래픽 엔진: Paint Essential Core Engine v1.2.0\n"
+                "• 그래픽 엔진: Paint Essential Core Engine v1.2.1\n"
                 "• 지원 환경: Windows 10 / 11 (64-bit)\n\n"
+                "[ v1.2.1 마이너 패치 안내 ]\n"
+                "1. 도형 자동 래스터라이즈(병합) 버그 수정:\n"
+                "   - 도형 수정 후 캔버스 바깥 영역 클릭 시 의도치 않게 레이어로 강제 병합되던 현상 수정\n"
+                "   - Enter 키, 더블 클릭, 컨텍스트 메뉴를 통해서만 명시적 병합 지원\n"
+                "2. 다크 모드 스크롤바 가시성 개선:\n"
+                "   - 소프트 스카이 블루(#60a5fa) 테마 적용으로 가시성 및 조작성 향상\n\n"
                 "[ v1.2.0 신규 기능 안내 ]\n"
                 "1. 스마트 도구 옵션 바:\n"
                 "   - 순서 배지 (단축키 K): 시작 번호 설정 및 숫자/영문 대소문자 스타일 지원\n"
@@ -92,7 +98,7 @@ def package_exe():
 
         # Create zip archive
         import zipfile
-        zip_path = os.path.join("dist", "PaintEssential_v1.2.0_Portable.zip")
+        zip_path = os.path.join("dist", "PaintEssential_v1.2.1_Portable.zip")
         if os.path.exists(zip_path):
             os.remove(zip_path)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:

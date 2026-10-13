@@ -171,8 +171,8 @@ class SettingsDialog(QDialog):
         version_label = I18N.tr("credits_version_label", lang)
 
         self.author_lbl.setText(f"✨ <b>{author_label}</b>: L.Jack with Google Antigravity")
-        self.engine_lbl.setText(f"⚡ <b>{engine_label}</b>: Paint Essential Core Engine v1.2.0")
-        self.version_lbl.setText(f"📦 <b>{version_label}</b>: Paint Essential v1.2.0")
+        self.engine_lbl.setText(f"⚡ <b>{engine_label}</b>: Paint Essential Core Engine v1.2.1")
+        self.version_lbl.setText(f"📦 <b>{version_label}</b>: Paint Essential v1.2.1")
 
         self.patch_text.setPlainText(I18N.tr("patch_notes_content", lang))
 
