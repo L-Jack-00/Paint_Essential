@@ -28,6 +28,7 @@ class LayerPanel(QWidget):
     layer_changed = pyqtSignal()
     shape_selected = pyqtSignal(str)   # Emits shape_id when user clicks shape in tree
     shape_merge_requested = pyqtSignal(str) # Emits shape_id to merge to raster
+    layer_merge_down_requested = pyqtSignal(str) # Emits layer_id to merge down
     shape_delete_requested = pyqtSignal(str)
 
     def __init__(self, layer_manager: LayerManager, parent=None, history_manager=None):
@@ -314,6 +315,9 @@ class LayerPanel(QWidget):
 
         elif layer.layer_type == LayerType.RASTER:
             add_act = menu.addAction(I18N.tr("layer_add"))
+            merge_down_act = None
+            if self.layer_manager.find_raster_layer_below(layer_id) is not None:
+                merge_down_act = menu.addAction(I18N.tr("menu_merge_down"))
             indent_act = None
             outdent_act = None
             if layer.parent_id:
@@ -326,6 +330,8 @@ class LayerPanel(QWidget):
             chosen = menu.exec(self.tree.mapToGlobal(pos))
             if chosen == add_act:
                 self._add_layer()
+            elif chosen == merge_down_act and merge_down_act:
+                self.layer_merge_down_requested.emit(layer_id)
             elif chosen == indent_act and indent_act:
                 self._indent_layer(layer_id)
             elif chosen == outdent_act and outdent_act:

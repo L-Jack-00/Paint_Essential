@@ -291,9 +291,38 @@ class LayerManager:
                 return True
         return False
 
+    def find_raster_layer_below(self, layer_or_shape_id: str) -> Optional[Layer]:
+        """
+        Finds the nearest raster layer directly below the specified layer or shape in the stack.
+        Skips all shape layers ('도형같은거 말고 꼭 래스터레이어에 병합').
+        """
+        idx = -1
+        for i, l in enumerate(self.layers):
+            if l.id == layer_or_shape_id or (l.layer_type == LayerType.SHAPE and any(s.id == layer_or_shape_id for s in l.shapes)):
+                idx = i
+                break
+
+        if idx == -1:
+            return None
+
+        # Search downwards (towards bottom of layer stack, lower z-index)
+        for i in range(idx - 1, -1, -1):
+            cand = self.layers[i]
+            if cand.layer_type == LayerType.RASTER and cand.raster_image is not None:
+                return cand
+
+        # Fallback: if none below, search upwards (higher z-index)
+        for i in range(idx + 1, len(self.layers)):
+            cand = self.layers[i]
+            if cand.layer_type == LayerType.RASTER and cand.raster_image is not None:
+                return cand
+
+        return None
+
     def merge_shape_into_raster(self, shape_id: str, target_raster_layer_id: Optional[str] = None) -> bool:
         """
-        Bakes a vector shape permanently into the raster layer and removes it from shape layer.
+        Bakes a vector shape permanently into the raster layer directly below it (skipping shapes)
+        and removes it from shape layer.
         """
         shape_layer = self.get_default_shape_layer()
         target_shape = None
@@ -309,15 +338,13 @@ class LayerManager:
         target_layer = None
         if target_raster_layer_id:
             target_layer = self.get_layer(target_raster_layer_id)
-        if not target_layer or target_layer.layer_type != LayerType.RASTER:
-            active = self.get_active_layer()
-            if active and active.layer_type == LayerType.RASTER:
-                target_layer = active
-            else:
-                for l in self.layers:
-                    if l.layer_type == LayerType.RASTER:
-                        target_layer = l
-                        break
+        if not target_layer or target_layer.layer_type != LayerType.RASTER or not target_layer.raster_image:
+            target_layer = self.find_raster_layer_below(shape_id)
+        if not target_layer or not target_layer.raster_image:
+            for l in self.layers:
+                if l.layer_type == LayerType.RASTER and l.raster_image is not None:
+                    target_layer = l
+                    break
 
         if not target_layer or not target_layer.raster_image:
             return False
@@ -332,6 +359,37 @@ class LayerManager:
         shape_layer.shapes.remove(target_shape)
         self.active_layer_id = target_layer.id
         return True
+
+    def merge_raster_layer_down(self, layer_id: str) -> Optional[str]:
+        """
+        Merges the specified raster layer down into the nearest raster layer directly below it.
+        Skips all shape layers ('도형같은거 말고 꼭 래스터레이어에 병합').
+        Returns target_layer_id on success, or None on failure.
+        """
+        source_layer = self.get_layer(layer_id)
+        if not source_layer or source_layer.layer_type != LayerType.RASTER or source_layer.raster_image is None:
+            return None
+
+        target_layer = self.find_raster_layer_below(layer_id)
+        if not target_layer or target_layer.layer_type != LayerType.RASTER or target_layer.raster_image is None:
+            return None
+
+        # Paint source raster image onto target raster image
+        painter = QPainter(target_layer.raster_image)
+        painter.setOpacity(source_layer.opacity)
+        painter.drawImage(0, 0, source_layer.raster_image)
+        painter.end()
+
+        # Re-assign any child layers of source_layer to target_layer
+        for l in self.layers:
+            if l.parent_id == source_layer.id:
+                l.parent_id = target_layer.id
+
+        # Remove source layer
+        if source_layer in self.layers:
+            self.layers.remove(source_layer)
+        self.active_layer_id = target_layer.id
+        return target_layer.id
 
     def is_layer_effectively_visible(self, layer_id: str) -> bool:
         """

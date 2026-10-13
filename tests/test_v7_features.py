@@ -308,6 +308,87 @@ class TestV7Features(unittest.TestCase):
         self.cv.mouseMoveEvent(move_event)
         self.assertIsNone(self.cv._loupe_cursor_pos)
 
+    # 8. Merge into Raster Layer Directly Below (Skipping Shapes)
+    def test_shape_merge_into_raster_layer_below_skipping_shapes(self):
+        """Verifies shape merges into the raster layer directly below it, skipping other shapes."""
+        # Setup stack: bg_layer (white) -> layer1 (transparent) -> shape1 (blue rect) -> shape2 (red rect)
+        bg = self.lm.get_layer("bg_layer")
+        bg.raster_image.fill(QColor(255, 255, 255, 255))
+
+        layer1 = self.lm.add_layer("레이어 1")
+        # layer1 is transparent initially
+
+        # Add shape1
+        s1 = ShapeItemData(id="s1_blue", shape_type="rect", x=10, y=10, width=30, height=30, fill_color="#0000ff")
+        self.lm.add_shape_layer(s1)
+
+        # Add shape2
+        s2 = ShapeItemData(id="s2_red", shape_type="rect", x=50, y=50, width=30, height=30, fill_color="#ff0000")
+        self.lm.add_shape_layer(s2)
+
+        self.cv.rebuild_scene()
+
+        # Find target raster layer below shape2 (s2_red)
+        target = self.lm.find_raster_layer_below("s2_red")
+        self.assertIsNotNone(target)
+        self.assertEqual(target.id, layer1.id, "Target raster layer below shape 2 must be layer1, skipping shape 1!")
+
+        # Merge s2_red
+        self.cv.merge_shape_to_raster("s2_red")
+
+        # Verify s2_red pixels baked into layer1
+        c_layer1 = layer1.raster_image.pixelColor(60, 60)
+        self.assertEqual(c_layer1.red(), 255)
+        self.assertEqual(c_layer1.blue(), 0)
+
+        # Verify bg_layer did NOT get painted with s2_red (remains white)
+        c_bg = bg.raster_image.pixelColor(60, 60)
+        self.assertEqual(c_bg, QColor(255, 255, 255, 255))
+
+        # Test Undo
+        self.assertTrue(self.history.can_undo)
+        self.history.undo()
+        self.assertIn("s2_red", self.cv.shape_items)
+        # layer1 pixel should be reverted (alpha 0)
+        self.assertEqual(layer1.raster_image.pixelColor(60, 60).alpha(), 0)
+
+    def test_raster_layer_merge_down_skipping_shapes(self):
+        """Verifies raster layer merges down into the nearest raster layer below, skipping shapes."""
+        # Setup stack: bg_layer -> layer1 (green) -> shape1 (blue) -> layer2 (yellow)
+        bg = self.lm.get_layer("bg_layer")
+        layer1 = self.lm.add_layer("레이어 1")
+        layer1.raster_image.fill(QColor(0, 255, 0, 255))
+
+        s1 = ShapeItemData(id="s1_shape", shape_type="rect", x=10, y=10, width=20, height=20, fill_color="#0000ff")
+        self.lm.add_shape_layer(s1)
+
+        layer2 = self.lm.add_layer("레이어 2")
+        layer2.raster_image.fill(QColor(255, 255, 0, 255))
+
+        self.cv.rebuild_scene()
+
+        # Target below layer2 should be layer1 (skipping s1_shape)
+        target = self.lm.find_raster_layer_below(layer2.id)
+        self.assertIsNotNone(target)
+        self.assertEqual(target.id, layer1.id)
+
+        # Merge layer2 down
+        self.cv.merge_layer_down(layer2.id)
+
+        # layer2 should no longer exist in layer_manager.layers
+        self.assertIsNone(self.lm.get_layer(layer2.id))
+
+        # layer1 should now contain pixels from layer2 (yellow)
+        c_merged = layer1.raster_image.pixelColor(50, 50)
+        self.assertEqual(c_merged.red(), 255)
+        self.assertEqual(c_merged.green(), 255)
+
+        # Undo merge down
+        self.assertTrue(self.history.can_undo)
+        self.history.undo()
+        self.assertIsNotNone(self.lm.get_layer(layer2.id))
+        self.assertEqual(layer1.raster_image.pixelColor(50, 50), QColor(0, 255, 0, 255))
+
 
 if __name__ == "__main__":
     unittest.main()

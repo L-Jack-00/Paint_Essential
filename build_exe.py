@@ -54,7 +54,7 @@ def package_exe():
     result = subprocess.run(cmd)
     if result.returncode == 0:
         dist_src = os.path.join("dist", "Paint Essential")
-        portable_dir = os.path.join("dist", "PaintEssential_v1.2.1_Portable")
+        portable_dir = os.path.join("dist", "PaintEssential_v1.2.2_Portable")
         if os.path.exists(portable_dir):
             shutil.rmtree(portable_dir, ignore_errors=True)
         shutil.copytree(dist_src, portable_dir)
@@ -63,11 +63,16 @@ def package_exe():
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(
                 "============================================================\n"
-                "  🎨 Paint Essential (페인트 에센셜) v1.2.1\n"
+                "  🎨 Paint Essential (페인트 에센셜) v1.2.2\n"
                 "============================================================\n\n"
                 "• 제작 및 개발: L.Jack with Google Antigravity\n"
-                "• 그래픽 엔진: Paint Essential Core Engine v1.2.1\n"
+                "• 그래픽 엔진: Paint Essential Core Engine v1.2.2\n"
                 "• 지원 환경: Windows 10 / 11 (64-bit)\n\n"
+                "[ v1.2.2 마이너 패치 안내 ]\n"
+                "1. 바로 아래 래스터 레이어로의 병합 로직 개편:\n"
+                "   - 도형 병합 시 배경 레이어가 아닌 바로 아래 위치한 래스터 레이어로 정확히 병합\n"
+                "   - 중간에 다른 도형 레이어가 있더라도 도형은 건너뛰고 반드시 래스터 레이어에만 안전하게 병합\n"
+                "   - 래스터 레이어 패널 및 Ctrl+E 단축키를 통한 '아래 레이어와 병합(Merge Down)' 기능 신규 지원\n\n"
                 "[ v1.2.1 마이너 패치 안내 ]\n"
                 "1. 도형 자동 래스터라이즈(병합) 버그 수정:\n"
                 "   - 도형 수정 후 캔버스 바깥 영역 클릭 시 의도치 않게 레이어로 강제 병합되던 현상 수정\n"
@@ -98,7 +103,7 @@ def package_exe():
 
         # Create zip archive
         import zipfile
-        zip_path = os.path.join("dist", "PaintEssential_v1.2.1_Portable.zip")
+        zip_path = os.path.join("dist", "PaintEssential_v1.2.2_Portable.zip")
         if os.path.exists(zip_path):
             os.remove(zip_path)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:

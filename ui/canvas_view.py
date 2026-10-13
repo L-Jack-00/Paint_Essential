@@ -1362,15 +1362,15 @@ class CanvasView(QGraphicsView):
         self.merge_shape_to_raster(shape_id)
 
     def merge_shape_to_raster(self, shape_id: str):
-        active_layer = self.layer_manager.get_active_layer()
-        if not active_layer or active_layer.layer_type != LayerType.RASTER:
-            # Fallback to first raster layer
+        target_layer = self.layer_manager.find_raster_layer_below(shape_id)
+        if not target_layer or not target_layer.raster_image:
+            # Fallback to any raster layer
             for l in self.layer_manager.layers:
-                if l.layer_type == LayerType.RASTER:
-                    active_layer = l
+                if l.layer_type == LayerType.RASTER and l.raster_image is not None:
+                    target_layer = l
                     break
 
-        if not active_layer or not active_layer.raster_image:
+        if not target_layer or not target_layer.raster_image:
             return
 
         shape_layer = self.layer_manager.get_default_shape_layer()
@@ -1383,8 +1383,8 @@ class CanvasView(QGraphicsView):
         if not shape_data:
             return
 
-        old_img = active_layer.raster_image.copy()
-        target_layer_id = active_layer.id
+        target_layer_id = target_layer.id
+        old_img = target_layer.raster_image.copy()
 
         if self.layer_manager.merge_shape_into_raster(shape_id, target_layer_id):
             if shape_id in self.shape_items:
@@ -1393,7 +1393,7 @@ class CanvasView(QGraphicsView):
             self.update_raster_pixmap(target_layer_id)
             self.canvas_modified.emit()
 
-            new_img = active_layer.raster_image.copy()
+            new_img = target_layer.raster_image.copy()
 
             def undo():
                 lay = self.layer_manager.get_layer(target_layer_id)
@@ -1415,8 +1415,60 @@ class CanvasView(QGraphicsView):
                 self.canvas_modified.emit()
 
             self.history_manager.record_step(
-                "도형을 레이어에 고정", undo, redo,
+                "도형을 아래 래스터 레이어에 병합", undo, redo,
                 estimated_bytes=new_img.width() * new_img.height() * 4
+            )
+
+    def merge_layer_down(self, layer_id: str):
+        source_layer = self.layer_manager.get_layer(layer_id)
+        if not source_layer:
+            return
+
+        # If it's a shape layer, delegate to merge_shape_to_raster
+        if source_layer.layer_type == LayerType.SHAPE:
+            shape_id = source_layer.shapes[0].id if source_layer.shapes else layer_id
+            self.merge_shape_to_raster(shape_id)
+            return
+
+        if source_layer.layer_type != LayerType.RASTER or not source_layer.raster_image:
+            return
+
+        target_layer = self.layer_manager.find_raster_layer_below(layer_id)
+        if not target_layer or target_layer.layer_type != LayerType.RASTER or not target_layer.raster_image:
+            return
+
+        target_id = target_layer.id
+        old_target_img = target_layer.raster_image.copy()
+        old_source_layer = source_layer
+        source_idx = self.layer_manager.layers.index(source_layer)
+        source_img = source_layer.raster_image.copy()
+
+        if self.layer_manager.merge_raster_layer_down(layer_id):
+            self.update_raster_pixmap(target_id)
+            self.rebuild_scene()
+            self.canvas_modified.emit()
+
+            new_target_img = target_layer.raster_image.copy()
+
+            def undo():
+                t_lay = self.layer_manager.get_layer(target_id)
+                if t_lay:
+                    t_lay.raster_image = old_target_img.copy()
+                if old_source_layer not in self.layer_manager.layers:
+                    self.layer_manager.layers.insert(source_idx, old_source_layer)
+                old_source_layer.raster_image = source_img.copy()
+                self.layer_manager.active_layer_id = layer_id
+                self.rebuild_scene()
+                self.canvas_modified.emit()
+
+            def redo():
+                self.layer_manager.merge_raster_layer_down(layer_id)
+                self.rebuild_scene()
+                self.canvas_modified.emit()
+
+            self.history_manager.record_step(
+                "아래 레이어로 병합", undo, redo,
+                estimated_bytes=new_target_img.width() * new_target_img.height() * 4
             )
 
     def _on_shape_delete_requested(self, item: TransformableShapeItem):

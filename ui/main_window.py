@@ -445,6 +445,10 @@ class MainWindow(QMainWindow):
         zoom_reset_sc = QShortcut(QKeySequence("Ctrl+0"), self)
         zoom_reset_sc.activated.connect(self._action_zoom_reset)
 
+        # Ctrl+E Merge Down shortcut
+        merge_down_sc = QShortcut(QKeySequence("Ctrl+E"), self)
+        merge_down_sc.activated.connect(self._action_merge_down)
+
     def _create_color_icon(self, color: QColor, size: int = 20) -> QIcon:
         pix = QPixmap(size, size)
         pix.fill(Qt.GlobalColor.transparent)
@@ -856,6 +860,7 @@ class MainWindow(QMainWindow):
         self.layer_panel.layer_changed.connect(self._on_layer_changed)
         self.layer_panel.shape_selected.connect(self._on_shape_selected_from_panel)
         self.layer_panel.shape_merge_requested.connect(self._on_shape_merge_requested_from_panel)
+        self.layer_panel.layer_merge_down_requested.connect(self._on_layer_merge_down_requested_from_panel)
         self.layer_panel.shape_delete_requested.connect(self._on_shape_delete_requested_from_panel)
 
         self.layer_dock = QDockWidget(I18N.tr("dock_layers_title"), self)
@@ -1195,6 +1200,37 @@ class MainWindow(QMainWindow):
         if self.canvas_view:
             self.canvas_view.merge_shape_to_raster(shape_id)
             self.layer_panel.refresh_list()
+            self.status_bar.showMessage(I18N.tr("status_shape_merged"), 3000)
+
+    def _on_layer_merge_down_requested_from_panel(self, layer_id: str):
+        if self.canvas_view:
+            self.canvas_view.merge_layer_down(layer_id)
+            self.layer_panel.refresh_list()
+            self.status_bar.showMessage(I18N.tr("status_layer_merged_down"), 3000)
+
+    def _action_merge_down(self):
+        if not self.layer_manager or not self.canvas_view:
+            return
+        selected_shapes = [item for item in self.canvas_view.scene.selectedItems() if getattr(item, "shape_data", None)]
+        if selected_shapes:
+            for s_item in selected_shapes:
+                self.canvas_view.merge_shape_to_raster(s_item.shape_data.id)
+            self.layer_panel.refresh_list()
+            self.status_bar.showMessage(I18N.tr("status_shape_merged"), 3000)
+            return
+
+        active = self.layer_manager.get_active_layer()
+        if not active:
+            return
+        if active.layer_type == LayerType.SHAPE:
+            shape_id = active.shapes[0].id if active.shapes else active.id
+            self.canvas_view.merge_shape_to_raster(shape_id)
+            self.status_bar.showMessage(I18N.tr("status_shape_merged"), 3000)
+        elif active.layer_type == LayerType.RASTER:
+            if self.layer_manager.find_raster_layer_below(active.id) is not None:
+                self.canvas_view.merge_layer_down(active.id)
+                self.status_bar.showMessage(I18N.tr("status_layer_merged_down"), 3000)
+        self.layer_panel.refresh_list()
 
     def _on_shape_delete_requested_from_panel(self, shape_id: str):
         if self.canvas_view and shape_id in self.canvas_view.shape_items:

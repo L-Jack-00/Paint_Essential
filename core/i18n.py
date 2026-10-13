@@ -457,9 +457,13 @@ class I18N:
             "ko": "직선",
             "en": "Lines",
         },
+        "menu_merge_down": {
+            "ko": "⬇️ 아래 레이어와 병합",
+            "en": "⬇️ Merge Down",
+        },
         "menu_merge_raster": {
-            "ko": "🎨 레이어에 고정 (병합)",
-            "en": "🎨 Merge into Layer",
+            "ko": "🎨 아래 래스터 레이어에 병합",
+            "en": "🎨 Merge into Raster Layer Below",
         },
         "menu_bring_front": {
             "ko": "⬆️ 맨 앞으로 가져오기",
@@ -512,8 +516,12 @@ class I18N:
             "en": "Shape selected: Press Enter or double-click to place onto layer, Esc to deselect",
         },
         "status_shape_merged": {
-            "ko": "도형을 현재 레이어에 그렸습니다 (고정 완료).",
-            "en": "Shape merged into current layer.",
+            "ko": "도형을 바로 아래 래스터 레이어에 병합했습니다.",
+            "en": "Shape merged into raster layer directly below.",
+        },
+        "status_layer_merged_down": {
+            "ko": "레이어를 바로 아래 래스터 레이어에 병합했습니다.",
+            "en": "Layer merged into raster layer directly below.",
         },
 
         # Canvas HUD
@@ -565,6 +573,12 @@ class I18N:
         },
         "patch_notes_content": {
             "ko": (
+                "🛠️ [ Paint Essential v1.2.2 마이너 패치 안내 ]\n\n"
+                "• 바로 아래 래스터 레이어로의 병합 로직 개편:\n"
+                "  - 도형 병합 시 배경 레이어가 아닌 바로 아래 위치한 래스터 레이어로 정확히 병합\n"
+                "  - 중간에 다른 도형 레이어가 있더라도 도형은 건너뛰고 반드시 래스터 레이어에만 안전하게 병합\n"
+                "  - 래스터 레이어 패널 및 Ctrl+E 단축키를 통한 '아래 레이어와 병합(Merge Down)' 기능 신규 지원\n\n"
+                "--------------------------------------------------\n"
                 "🛠️ [ Paint Essential v1.2.1 마이너 패치 안내 ]\n\n"
                 "• 도형 자동 래스터라이즈(병합) 버그 수정:\n"
                 "  - 도형 크기/위치 조절 후 바깥 영역 클릭 시 레이어에 강제 병합되던 현상 해결\n"
@@ -596,6 +610,12 @@ class I18N:
                 "• 고해상도 디스플레이 완벽 지원 및 다크 모드/라이트 모드 지원"
             ),
             "en": (
+                "🛠️ [ Paint Essential v1.2.2 Minor Patch Notes ]\n\n"
+                "• Accurate Merge-Down into Raster Layer Below:\n"
+                "  - Shapes now merge into the raster layer directly below them in the stack instead of falling back to background\n"
+                "  - Skips any intermediate shape layers to ensure baking strictly into a bitmap raster canvas\n"
+                "  - Added Merge Down support for raster layers via context menu & Ctrl+E shortcut\n\n"
+                "--------------------------------------------------\n"
                 "🛠️ [ Paint Essential v1.2.1 Minor Patch Notes ]\n\n"
                 "• Fixed Shape Auto-Rasterize Issue:\n"
                 "  - Shapes no longer auto-merge to raster layer when clicking outside\n"
