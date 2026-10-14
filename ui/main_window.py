@@ -12,12 +12,13 @@ from PyQt6.QtWidgets import (
     QColorDialog, QFileDialog, QMessageBox, QLabel, QSpinBox,
     QDockWidget, QStatusBar, QTabWidget, QComboBox, QCheckBox,
     QToolButton, QGridLayout, QGroupBox, QPushButton, QSizePolicy,
-    QMenu
+    QMenu, QApplication, QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox
 )
 from PyQt6.QtGui import (
-    QAction, QIcon, QColor, QPixmap, QKeySequence, QImage, QPainter, QFont, QPen, QShortcut, QCursor
+    QAction, QIcon, QColor, QPixmap, QKeySequence, QImage, QPainter, QFont, QPen, QShortcut, QCursor,
+    QKeyEvent
 )
-from PyQt6.QtCore import Qt, QSize, QRect, QSettings
+from PyQt6.QtCore import Qt, QSize, QRect, QSettings, QEvent, pyqtSignal, QVariantAnimation, QEasingCurve
 
 from core.layer_manager import LayerManager, LayerType, ShapeItemData
 from core.history_manager import HistoryManager
@@ -74,6 +75,8 @@ class DocumentTab(QWidget):
 
 
 class MainWindow(QMainWindow):
+    property_highlight_triggered = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Paint Essential (페인트 에센셜) - LJack Edition")
@@ -87,6 +90,7 @@ class MainWindow(QMainWindow):
         # Global settings state
         self.current_theme: str = "light"
         self.current_language: str = "ko"
+        self.ghost_indicator_enabled: bool = True
 
         # Global input safety & tracking
         self.input_safety = InputSafetyTracker()
@@ -104,6 +108,8 @@ class MainWindow(QMainWindow):
         self.mosaic_block_size: int = 12
         self.rect_corner_radius: int = 12
         self.arrow_mode: str = "single"  # "single", "double", "curved_single", "curved_double"
+        self.current_font_size: int = 24
+        self.current_font_family: str = "Malgun Gothic"
 
         # In-memory per-tool remembered thresholds (Session-persistent, no external files)
         # Default: Flood Fill = 0 (alpha threshold %), Magic Wand = 32 (color tolerance)
@@ -124,6 +130,7 @@ class MainWindow(QMainWindow):
             InputMode.SHAPE_ARROW: 0,
             InputMode.MOSAIC: 12,
             InputMode.STEP_BADGE: 1,
+            InputMode.TEXT: 24,
         }
 
         # Canvas view orientation tracking (Rotation & Flip)
@@ -268,13 +275,16 @@ class MainWindow(QMainWindow):
             cv.rect_corner_radius = self.rect_corner_radius
         if hasattr(self, "arrow_mode"):
             cv.arrow_mode = self.arrow_mode
+        if hasattr(self, "current_font_size"):
+            cv.current_font_size = self.current_font_size
+        if hasattr(self, "current_font_family"):
+            cv.current_font_family = self.current_font_family
+        cv.ghost_indicator_enabled = getattr(self, "ghost_indicator_enabled", True)
 
         # Connect document signals
         def _on_status_msg(msg: str):
             if hasattr(self, "status_bar"):
                 self.status_bar.showMessage(msg, 4000)
-            if hasattr(self, "coord_label"):
-                self.coord_label.setText(msg)
 
         cv.status_message.connect(_on_status_msg)
         cv.color_picked.connect(self._on_color_picked)
@@ -449,6 +459,16 @@ class MainWindow(QMainWindow):
         merge_down_sc = QShortcut(QKeySequence("Ctrl+E"), self)
         merge_down_sc.activated.connect(self._action_merge_down)
 
+        # Delete shortcut for selection / shapes
+        del_act = QAction(self)
+        del_act.setShortcut(QKeySequence.StandardKey.Delete)
+        del_act.triggered.connect(self._action_delete)
+        self.addAction(del_act)
+
+        # F1 Settings shortcut
+        settings_sc = QShortcut(QKeySequence("F1"), self)
+        settings_sc.activated.connect(self._open_settings_dialog)
+
     def _create_color_icon(self, color: QColor, size: int = 20) -> QIcon:
         pix = QPixmap(size, size)
         pix.fill(Qt.GlobalColor.transparent)
@@ -489,6 +509,7 @@ class MainWindow(QMainWindow):
             InputMode.EYEDROPPER: "스포이드 (I)",
             InputMode.MOSAIC: "모자이크 (J)",
             InputMode.STEP_BADGE: "순서 배지 (K)",
+            InputMode.TEXT: "텍스트 (T)",
             InputMode.SHAPE_RECT: "직사각형 (U)",
             InputMode.SHAPE_ROUNDED_RECT: "둥근 직사각형 (U)",
             InputMode.SHAPE_ELLIPSE: "타원",
@@ -510,6 +531,7 @@ class MainWindow(QMainWindow):
             (InputMode.EYEDROPPER, "eyedropper", "I", "스포이드 (I) - 화면의 색상 추출 [정밀 돋보기 지원]"),
             (InputMode.MOSAIC, "mosaic", "J", "모자이크 (J) - 드래그한 영역을 모자이크 처리"),
             (InputMode.STEP_BADGE, "step_badge", "K", "순서 배지 (K) - 클릭할 때마다 순서대로 번호 배지 삽입 [우클릭: 설정]"),
+            (InputMode.TEXT, "text", "T", "텍스트 (T) - 캔버스에 텍스트 작성 및 서식 적용"),
             # Shapes
             (InputMode.SHAPE_RECT, "shape_rect", "U", "직사각형 (U) [우클릭/길게 누르기: 둥근 직사각형 선택]"),
             (InputMode.SHAPE_ROUNDED_RECT, "shape_rounded_rect", "", "둥근 직사각형 [모서리 곡률 조절 가능]"),
@@ -662,7 +684,7 @@ class MainWindow(QMainWindow):
         side_layout.setContentsMargins(6, 6, 6, 6)
         side_layout.setSpacing(6)
 
-        # 1. Tools Palette Group (4x3 Compact Grid)
+        # 1. Tools Palette Group (4x4 Compact Grid)
         self.tools_group = QGroupBox(I18N.tr("prop_tools_title"))
         tools_grid = QGridLayout(self.tools_group)
         tools_grid.setContentsMargins(4, 6, 4, 6)
@@ -680,6 +702,7 @@ class MainWindow(QMainWindow):
             (InputMode.EYEDROPPER, 2, 0),
             (InputMode.MOSAIC, 2, 1),
             (InputMode.STEP_BADGE, 2, 2),
+            (InputMode.TEXT, 2, 3),
             (InputMode.SHAPE_ELLIPSE, 3, 1),
             (InputMode.SHAPE_LINE, 3, 2),
         ]
@@ -801,7 +824,12 @@ class MainWindow(QMainWindow):
         props_layout.addLayout(alpha_row)
 
         # Threshold Row (Renamed from 채우기한계 to 임계값, remembered per tool)
-        thresh_row = QHBoxLayout()
+        self.threshold_container = QWidget()
+        self.threshold_container.setObjectName("ThresholdContainer")
+        self.threshold_container.setStyleSheet("#ThresholdContainer { border: 1.5px solid transparent; border-radius: 6px; }")
+        thresh_row = QHBoxLayout(self.threshold_container)
+        thresh_row.setContentsMargins(2, 2, 2, 2)
+        thresh_row.setSpacing(4)
         self.threshold_label = ScrubbyLabel(" 임계값: ", initial_value=0, min_val=0, max_val=255)
         self.threshold_label.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.threshold_label.customContextMenuRequested.connect(self._show_threshold_label_context_menu)
@@ -815,7 +843,7 @@ class MainWindow(QMainWindow):
         self.threshold_spin.valueChanged.connect(self._on_threshold_changed)
         thresh_row.addWidget(self.threshold_label)
         thresh_row.addWidget(self.threshold_spin)
-        props_layout.addLayout(thresh_row)
+        props_layout.addWidget(self.threshold_container)
 
         # Backward compatibility aliases
         self.fill_alpha_spin = self.threshold_spin
@@ -827,6 +855,13 @@ class MainWindow(QMainWindow):
         self.fill_all_layers_check.setToolTip("채우기 및 선택 시 화면에 보이는 모든 레이어의 경계를 참조합니다")
         self.fill_all_layers_check.toggled.connect(self._on_fill_all_layers_toggled)
         props_layout.addWidget(self.fill_all_layers_check)
+
+        # Ghost Indicator Checkbox
+        self.ghost_indicator_check = QCheckBox(" " + I18N.tr("opt_ghost_indicator"))
+        self.ghost_indicator_check.setChecked(getattr(self, "ghost_indicator_enabled", True))
+        self.ghost_indicator_check.setToolTip(I18N.tr("tooltip_ghost_indicator"))
+        self.ghost_indicator_check.toggled.connect(self._on_ghost_indicator_toggled)
+        props_layout.addWidget(self.ghost_indicator_check)
 
         # Toggles Row (Transparent Selection & Integer Pixel Snap)
         toggles_row = QHBoxLayout()
@@ -1028,6 +1063,18 @@ class MainWindow(QMainWindow):
                 self.threshold_label.setToolTip("임계값 (드래그 조절)")
                 self.threshold_label.setEnabled(True)
                 self.threshold_spin.setEnabled(True)
+            elif mode == InputMode.TEXT:
+                self.threshold_label.setText(" 글꼴 크기: ")
+                self.threshold_label.min_val = 8
+                self.threshold_label.max_val = 144
+                self.threshold_spin.setRange(8, 144)
+                self.threshold_spin.setSuffix(" pt")
+                val = self.current_font_size
+                self.threshold_spin.setValue(val)
+                self.threshold_spin.setToolTip("텍스트 글꼴 크기 (8~144 pt, 기본: 24 pt) [드래그 조절]")
+                self.threshold_label.setToolTip("글꼴 크기 (드래그 조절)")
+                self.threshold_label.setEnabled(True)
+                self.threshold_spin.setEnabled(True)
             else:
                 self.threshold_label.setText(" 임계값: ")
                 self.threshold_label.min_val = 0
@@ -1059,6 +1106,63 @@ class MainWindow(QMainWindow):
             elif mode == InputMode.SHAPE_ARROW:
                 self.canvas_view.arrow_mode = self.arrow_mode
 
+        if mode in (
+            InputMode.STEP_BADGE,
+            InputMode.MOSAIC,
+            InputMode.SHAPE_ROUNDED_RECT,
+            InputMode.FLOOD_FILL,
+            InputMode.SELECT_WAND,
+            InputMode.TEXT
+        ):
+            self.trigger_property_highlight(mode)
+
+    def trigger_property_highlight(self, mode=None):
+        """
+        Triggers a smooth 1-time pulse animation (accent blue glow fading out over ~0.5s)
+        on the sidebar threshold/property controls to draw user attention to dynamic parameter inputs.
+        """
+        mode_str = str(mode) if mode is not None else ""
+        self.property_highlight_triggered.emit(mode_str)
+
+        if not hasattr(self, "threshold_container") or not self.threshold_container:
+            return
+
+        if hasattr(self, "_pulse_anim") and self._pulse_anim:
+            self._pulse_anim.stop()
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(500)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutQuad)
+
+        def _on_pulse(val: float):
+            alpha = max(0.0, min(1.0, float(val)))
+            border_col = f"rgba(59, 130, 246, {alpha:.2f})"
+            bg_col = f"rgba(59, 130, 246, {alpha * 0.18:.2f})"
+            self.threshold_container.setStyleSheet(f"""
+                #ThresholdContainer {{
+                    border: 1.5px solid {border_col};
+                    border-radius: 6px;
+                    background-color: {bg_col};
+                }}
+            """)
+
+        def _on_finished():
+            if hasattr(self, "threshold_container") and self.threshold_container:
+                self.threshold_container.setStyleSheet("""
+                    #ThresholdContainer {
+                        border: 1.5px solid transparent;
+                        border-radius: 6px;
+                        background-color: transparent;
+                    }
+                """)
+
+        anim.valueChanged.connect(_on_pulse)
+        anim.finished.connect(_on_finished)
+        self._pulse_anim = anim
+        anim.start()
+
     def _on_threshold_changed(self, val: int):
         mode = self.input_safety.current_mode
         self.tool_thresholds[mode] = val
@@ -1081,6 +1185,11 @@ class MainWindow(QMainWindow):
         elif mode == InputMode.SELECT_WAND:
             if self.canvas_view:
                 self.canvas_view.fill_tolerance = val
+        elif mode == InputMode.TEXT:
+            self.current_font_size = val
+            if self.canvas_view:
+                self.canvas_view.current_font_size = val
+                self.canvas_view.update_selected_text_font_size(val)
 
     def _on_stroke_width_changed(self, val: int):
         self.current_stroke_width = val
@@ -1178,6 +1287,26 @@ class MainWindow(QMainWindow):
         if self.canvas_view:
             self.canvas_view.fill_sample_all_layers = checked
 
+    def _on_ghost_indicator_toggled(self, checked: bool):
+        self.ghost_indicator_enabled = bool(checked)
+        if hasattr(self, "ghost_indicator_check") and self.ghost_indicator_check.isChecked() != checked:
+            self.ghost_indicator_check.blockSignals(True)
+            self.ghost_indicator_check.setChecked(checked)
+            self.ghost_indicator_check.blockSignals(False)
+
+        if hasattr(self, "tab_widget"):
+            for i in range(self.tab_widget.count()):
+                tab = self.tab_widget.widget(i)
+                if isinstance(tab, DocumentTab) and hasattr(tab, "canvas_view"):
+                    tab.canvas_view.set_ghost_indicator_enabled(checked)
+        elif hasattr(self, "canvas_view") and self.canvas_view:
+            self.canvas_view.set_ghost_indicator_enabled(checked)
+
+        self._save_app_settings()
+        msg = I18N.tr("status_ghost_enabled") if checked else I18N.tr("status_ghost_disabled")
+        if hasattr(self, "status_bar"):
+            self.status_bar.showMessage(msg, 2000)
+
     def _on_canvas_adjustment_requested(self, selection_rect: QRect):
         self._action_adjust_colors(selection_rect=selection_rect)
 
@@ -1231,6 +1360,15 @@ class MainWindow(QMainWindow):
                 self.canvas_view.merge_layer_down(active.id)
                 self.status_bar.showMessage(I18N.tr("status_layer_merged_down"), 3000)
         self.layer_panel.refresh_list()
+
+    def _action_delete(self):
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox)):
+            ev = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+            QApplication.sendEvent(focus_widget, ev)
+            return
+        if self.canvas_view:
+            self.canvas_view.delete_selected_content()
 
     def _on_shape_delete_requested_from_panel(self, shape_id: str):
         if self.canvas_view and shape_id in self.canvas_view.shape_items:
@@ -1497,10 +1635,12 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(
             current_theme=getattr(self, "current_theme", "light"),
             current_language=getattr(self, "current_language", "ko"),
+            ghost_indicator_enabled=getattr(self, "ghost_indicator_enabled", True),
             parent=self
         )
         dlg.theme_changed.connect(self._on_theme_changed)
         dlg.language_changed.connect(self._on_language_changed)
+        dlg.ghost_indicator_toggled.connect(self._on_ghost_indicator_toggled)
         dlg.exec()
 
     def _on_theme_changed(self, theme: str):
@@ -1975,6 +2115,7 @@ class MainWindow(QMainWindow):
             settings.setValue("language", getattr(self, "current_language", "ko"))
             settings.setValue("strokeWidth", getattr(self, "current_stroke_width", 3))
             settings.setValue("gridSpacing", getattr(self, "current_grid_spacing", 32))
+            settings.setValue("ghostIndicatorEnabled", getattr(self, "ghost_indicator_enabled", True))
         except Exception:
             pass
 
@@ -2012,6 +2153,17 @@ class MainWindow(QMainWindow):
             saved_grid = settings.value("gridSpacing", None, type=int)
             if saved_grid and saved_grid > 0:
                 self.current_grid_spacing = saved_grid
+
+            saved_ghost = settings.value("ghostIndicatorEnabled", None)
+            if saved_ghost is not None:
+                if isinstance(saved_ghost, str):
+                    self.ghost_indicator_enabled = saved_ghost.lower() in ("true", "1")
+                else:
+                    self.ghost_indicator_enabled = bool(saved_ghost)
+                if hasattr(self, "ghost_indicator_check"):
+                    self.ghost_indicator_check.blockSignals(True)
+                    self.ghost_indicator_check.setChecked(self.ghost_indicator_enabled)
+                    self.ghost_indicator_check.blockSignals(False)
         except Exception:
             pass
 
@@ -2065,6 +2217,7 @@ class MainWindow(QMainWindow):
             InputMode.FLOOD_FILL: ("tool_flood_fill", "tool_flood_fill_tip"),
             InputMode.MOSAIC: ("tool_mosaic", "tool_mosaic_tip"),
             InputMode.STEP_BADGE: ("tool_step_badge", "tool_step_badge_tip"),
+            InputMode.TEXT: ("tool_text", "tool_text_tip"),
             InputMode.SHAPE_RECT: ("tool_shape_rect", "tool_shape_rect_tip"),
             InputMode.SHAPE_ROUNDED_RECT: ("tool_shape_rounded_rect", "tool_shape_rounded_rect_tip"),
             InputMode.SHAPE_ELLIPSE: ("tool_shape_ellipse", "tool_shape_ellipse_tip"),
@@ -2106,6 +2259,8 @@ class MainWindow(QMainWindow):
                 self.threshold_label.setText(" " + I18N.tr("prop_block_size") + " ")
             elif cur_mode == InputMode.SHAPE_ROUNDED_RECT:
                 self.threshold_label.setText(" " + I18N.tr("prop_corner_radius") + " ")
+            elif cur_mode == InputMode.TEXT:
+                self.threshold_label.setText(" " + I18N.tr("prop_font_size") + " ")
             else:
                 self.threshold_label.setText(I18N.tr("prop_threshold"))
         if hasattr(self, "threshold_spin"):
@@ -2113,6 +2268,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "fill_all_layers_check"):
             self.fill_all_layers_check.setText(I18N.tr("prop_all_layers"))
             self.fill_all_layers_check.setToolTip(I18N.tr("prop_all_layers_tip"))
+        if hasattr(self, "ghost_indicator_check"):
+            self.ghost_indicator_check.setText(" " + I18N.tr("opt_ghost_indicator", lang))
+            self.ghost_indicator_check.setToolTip(I18N.tr("tooltip_ghost_indicator", lang))
         if hasattr(self, "trans_select_act"):
             self.trans_select_act.setText(I18N.tr("prop_trans_select"))
             self.trans_select_act.setToolTip(I18N.tr("prop_trans_select_tip"))

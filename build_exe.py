@@ -54,7 +54,7 @@ def package_exe():
     result = subprocess.run(cmd)
     if result.returncode == 0:
         dist_src = os.path.join("dist", "Paint Essential")
-        portable_dir = os.path.join("dist", "PaintEssential_v1.2.2_Portable")
+        portable_dir = os.path.join("dist", "PaintEssential_v1.3.0_Portable")
         if os.path.exists(portable_dir):
             shutil.rmtree(portable_dir, ignore_errors=True)
         shutil.copytree(dist_src, portable_dir)
@@ -63,11 +63,26 @@ def package_exe():
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(
                 "============================================================\n"
-                "  🎨 Paint Essential (페인트 에센셜) v1.2.2\n"
+                "  🎨 Paint Essential (페인트 에센셜) v1.3.0\n"
                 "============================================================\n\n"
                 "• 제작 및 개발: L.Jack with Google Antigravity\n"
-                "• 그래픽 엔진: Paint Essential Core Engine v1.2.2\n"
+                "• 그래픽 엔진: Paint Essential Core Engine v1.3.0\n"
                 "• 지원 환경: Windows 10 / 11 (64-bit)\n\n"
+                "[ v1.3.0 신규 업데이트 및 전체 최적화 안내 ]\n"
+                "1. 전체적인 성능 최적화 및 렌더링 파이프라인 개편:\n"
+                "   - 스마트 뷰포트 갱신(SmartViewportUpdate)으로 4K/고해상도 환경에서 렌더링 부하 최소화\n"
+                "   - 실시간 스트로크 드로잉 쓰로틀링 적용으로 브러시/연필/지우개 래그 제로화 달성\n"
+                "   - 스포이드 픽셀 돋보기 실시간 합성 레이어 캐싱 적용으로 마우스 호버 시 CPU 사용량 대폭 경감\n\n"
+                "2. 텍스트 입력 기능 완성 및 클립보드 붙여넣기 안정화:\n"
+                "   - 텍스트 도구(T)를 통한 글꼴, 크기, 스타일 실시간 편집 지원\n"
+                "   - 장문의 멀티라인 텍스트 붙여넣기 시 크래시 없는 바운딩 박스 자동 측정 지원\n\n"
+                "3. 선택 영역 삭제 및 Delete 키 동작 고도화:\n"
+                "   - Delete 키 입력 시 점선 선택 영역(Marquee)은 유지하면서 내부 이미지/도형만 깔끔하게 삭제\n"
+                "   - 투명 선택 토글 OFF 시 서브 컬러(색 2 / 배경색) 유지, 토글 ON 시 투명화 삭제 연동\n"
+                "   - 도형 레이어가 활성화된 상태에서도 선택 영역 내부의 이미지 및 도형 정확히 감지 및 삭제\n\n"
+                "4. 우클릭 도형 그리기 및 팝업 버그 해결:\n"
+                "   - 우클릭 드래그 도형 생성 직후 불필요하게 뜨던 컨텍스트 메뉴 팝업 억제\n"
+                "   - 도형 팝업 닫기(바깥 클릭) 시 텍스트 다이얼로그가 돌발 실행되던 버그 완벽 수정\n\n"
                 "[ v1.2.2 마이너 패치 안내 ]\n"
                 "1. 바로 아래 래스터 레이어로의 병합 로직 개편:\n"
                 "   - 도형 병합 시 배경 레이어가 아닌 바로 아래 위치한 래스터 레이어로 정확히 병합\n"
@@ -103,7 +118,7 @@ def package_exe():
 
         # Create zip archive
         import zipfile
-        zip_path = os.path.join("dist", "PaintEssential_v1.2.2_Portable.zip")
+        zip_path = os.path.join("dist", "PaintEssential_v1.3.0_Portable.zip")
         if os.path.exists(zip_path):
             os.remove(zip_path)
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:

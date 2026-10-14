@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 import uuid
-from PyQt6.QtGui import QImage, QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF
-from PyQt6.QtCore import QPointF
+from PyQt6.QtGui import QImage, QPainter, QColor, QPen, QBrush, QPainterPath, QPolygonF, QFont
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from core.shape_geometry import create_arrow_path, create_rounded_rect_path
 
 
@@ -180,6 +180,7 @@ class LayerManager:
             "ellipse": "타원",
             "line": "직선",
             "arrow": "화살표",
+            "text": "텍스트",
         }
         base_name = names_map.get(shape_type, "도형")
         existing_names = {l.name for l in self.layers}
@@ -246,6 +247,8 @@ class LayerManager:
         if not layer:
             return False
         target_parent = layer.parent_id
+        if target_parent is not None and not any(l.id == target_parent for l in self.layers if l.id != layer_id):
+            target_parent = None
         for l in self.layers:
             if l.parent_id == layer_id:
                 l.parent_id = target_parent
@@ -403,7 +406,9 @@ class LayerManager:
         visited = {curr.id}
         while curr.parent_id:
             parent = self.get_layer(curr.parent_id)
-            if not parent or not parent.visible:
+            if not parent:
+                break
+            if not parent.visible:
                 return False
             if parent.id in visited:
                 break
@@ -474,6 +479,20 @@ class LayerManager:
             arr_mode = shape.meta.get("arrow_mode", "single")
             path = create_arrow_path(float(shape.width), float(shape.height), arr_mode, shape.meta)
             painter.drawPath(path)
+        elif shape.shape_type == "text":
+            text_str = shape.meta.get("text", "")
+            font_size = int(shape.meta.get("font_size", 24))
+            font_family = shape.meta.get("font_family", "Malgun Gothic")
+            font_bold = shape.meta.get("font_bold", False)
+            font_italic = shape.meta.get("font_italic", False)
+            font = QFont(font_family, font_size)
+            font.setBold(font_bold)
+            font.setItalic(font_italic)
+            painter.setFont(font)
+            painter.setPen(pen)
+            if fill_c.alpha() > 0:
+                painter.fillRect(QRectF(-w2, -h2, float(shape.width), float(shape.height)), brush)
+            painter.drawText(QRectF(-w2, -h2, float(shape.width), float(shape.height)), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, text_str)
 
         painter.restore()
 

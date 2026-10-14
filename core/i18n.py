@@ -211,6 +211,14 @@ class I18N:
             "ko": "순서 번호 배지 삽입 (K)",
             "en": "Insert sequential step badge (K)",
         },
+        "tool_text": {
+            "ko": "텍스트",
+            "en": "Text",
+        },
+        "tool_text_tip": {
+            "ko": "텍스트 입력 및 서식 (T)",
+            "en": "Text input and formatting (T)",
+        },
         "tool_shape_rect": {
             "ko": "직사각형",
             "en": "Rectangle",
@@ -457,6 +465,10 @@ class I18N:
             "ko": "직선",
             "en": "Lines",
         },
+        "menu_edit_text": {
+            "ko": "✏️ 텍스트 내용 수정",
+            "en": "✏️ Edit Text Content",
+        },
         "menu_merge_down": {
             "ko": "⬇️ 아래 레이어와 병합",
             "en": "⬇️ Merge Down",
@@ -523,6 +535,22 @@ class I18N:
             "ko": "레이어를 바로 아래 래스터 레이어에 병합했습니다.",
             "en": "Layer merged into raster layer directly below.",
         },
+        "status_text_created": {
+            "ko": "텍스트 레이어를 생성했습니다.",
+            "en": "Text layer created.",
+        },
+        "dlg_text_title": {
+            "ko": "텍스트 입력 및 편집",
+            "en": "Text Input & Editing",
+        },
+        "dlg_text_prompt": {
+            "ko": "캔버스에 삽입할 텍스트를 입력하세요:",
+            "en": "Enter the text to place on canvas:",
+        },
+        "prop_font_size": {
+            "ko": "글꼴 크기",
+            "en": "Font Size",
+        },
 
         # Canvas HUD
         "hud_zoom_in_tip": {
@@ -573,6 +601,22 @@ class I18N:
         },
         "patch_notes_content": {
             "ko": (
+                "🎉 [ Paint Essential v1.3.0 신규 업데이트 및 전체 최적화 안내 ]\n\n"
+                "• 전체적인 성능 최적화 및 렌더링 파이프라인 개편:\n"
+                "  - 스마트 뷰포트 갱신(SmartViewportUpdate) 적용으로 4K/고해상도 환경에서 렌더링 부하 최소화\n"
+                "  - 스트로크 실시간 드로잉 이벤트 쓰로틀링 적용으로 브러시/연필/지우개 래그 제로화 달성\n"
+                "  - 스포이드 돋보기 실시간 합성 레이어 캐싱 적용으로 마우스 호버 시 CPU 사용량 대폭 경감\n\n"
+                "• 텍스트 입력 기능 완성 및 클립보드 붙여넣기 안정화:\n"
+                "  - 텍스트 도구(T)를 통한 폰트 크기/서체/스타일 실시간 편집 다이얼로그 지원\n"
+                "  - 장문의 멀티라인 텍스트 붙여넣기 시 크래시 없는 견고한 바운딩 박스 자동 측정 지원\n\n"
+                "• 선택 영역 삭제 및 Delete 키 동작 고도화:\n"
+                "  - Delete 키 입력 시 점선 선택 영역(Marquee)은 유지하면서 내부 이미지/도형만 깔끔하게 삭제\n"
+                "  - 투명 선택 토글 OFF 시 서브 컬러(색 2 / 배경색) 유지, 토글 ON 시 투명화 삭제 연동\n"
+                "  - 도형 레이어가 활성화된 상태에서도 선택 영역 내부의 이미지 및 도형 정확히 감지 및 삭제\n\n"
+                "• 우클릭 도형 그리기 및 팝업 버그 해결:\n"
+                "  - 우클릭 드래그 도형 생성 직후 불필요하게 뜨던 컨텍스트 메뉴 팝업 억제\n"
+                "  - 도형 팝업 닫기(바깥 클릭) 시 텍스트 다이얼로그가 돌발 실행되던 버그 완벽 수정\n\n"
+                "--------------------------------------------------\n"
                 "🛠️ [ Paint Essential v1.2.2 마이너 패치 안내 ]\n\n"
                 "• 바로 아래 래스터 레이어로의 병합 로직 개편:\n"
                 "  - 도형 병합 시 배경 레이어가 아닌 바로 아래 위치한 래스터 레이어로 정확히 병합\n"
@@ -610,6 +654,22 @@ class I18N:
                 "• 고해상도 디스플레이 완벽 지원 및 다크 모드/라이트 모드 지원"
             ),
             "en": (
+                "🎉 [ Paint Essential v1.3.0 Release & Performance Optimization ]\n\n"
+                "• Full Rendering Pipeline & Performance Optimization:\n"
+                "  - Smart Viewport Updates (SmartViewportUpdate) minimizing rendering overhead on 4K/High-DPI displays\n"
+                "  - Real-time drawing event throttling eliminating brush/pencil/eraser input lag\n"
+                "  - Eyedropper composite layer caching significantly reducing CPU usage during mouse hover\n\n"
+                "• Text Tool Implementation & Robust Clipboard Paste:\n"
+                "  - Text tool (T) dialog for font size, family, and styling adjustments\n"
+                "  - Hardened multiline text clipboard paste with auto-sizing bounds and zero-crash guarantees\n\n"
+                "• Area Image Deletion & Delete Key Modernization:\n"
+                "  - Pressing Delete erases image & shapes inside selection while keeping the marquee box active\n"
+                "  - Secondary color preserved when transparent selection is OFF, and transparent when ON\n"
+                "  - Reliable content deletion even when vector shape layer is currently active\n\n"
+                "• Right-Click Shape & Context Menu Enhancements:\n"
+                "  - Suppressed intrusive context menu popup upon finishing right-click shape creation\n"
+                "  - Fixed unexpected text dialog popup when dismissing shape context menu\n\n"
+                "--------------------------------------------------\n"
                 "🛠️ [ Paint Essential v1.2.2 Minor Patch Notes ]\n\n"
                 "• Accurate Merge-Down into Raster Layer Below:\n"
                 "  - Shapes now merge into the raster layer directly below them in the stack instead of falling back to background\n"
@@ -694,6 +754,32 @@ class I18N:
         "credits_version_label": {
             "ko": "버전 정보",
             "en": "Version",
+        },
+
+        # Interaction & UX Options
+        "group_interaction": {
+            "ko": "상호작용 및 UX",
+            "en": "Interaction & UX",
+        },
+        "opt_ghost_indicator": {
+            "ko": "도형 확정 예고 (고스트 인디케이터)",
+            "en": "Shape Commit Preview (Ghost Indicator)",
+        },
+        "tooltip_ghost_indicator": {
+            "ko": "도형 선택 시 빈 공간에 마우스를 올리면 픽셀 고정 안내를 표시하고, 클릭 시 레이어에 즉시 병합합니다.",
+            "en": "Displays commit preview badge when hovering empty canvas, and merges shape into layer upon clicking outside.",
+        },
+        "ghost_commit_badge": {
+            "ko": "✓ 클릭 시 픽셀 고정",
+            "en": "✓ Click to bake pixels",
+        },
+        "status_ghost_enabled": {
+            "ko": "도형 확정 예고(고스트 인디케이터)가 활성화되었습니다.",
+            "en": "Ghost Indicator preview enabled",
+        },
+        "status_ghost_disabled": {
+            "ko": "도형 확정 예고(고스트 인디케이터)가 비활성화되었습니다.",
+            "en": "Ghost Indicator preview disabled",
         },
 
         # Adjustment Dialog

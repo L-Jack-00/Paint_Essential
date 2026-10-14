@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QGraphicsItem, QStyleOptionGraphicsItem, QWidget, QMenu
 )
 from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QCursor, QPainterPath, QPolygonF
+from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QCursor, QPainterPath, QPolygonF, QFont
 from core.layer_manager import ShapeItemData
 from core.shape_geometry import create_arrow_path, create_rounded_rect_path
 from core.i18n import I18N
@@ -43,14 +43,16 @@ class TransformableShapeItem(QGraphicsItem):
         on_merge_raster_cb: Optional[Callable[['TransformableShapeItem'], None]] = None,
         on_delete_cb: Optional[Callable[['TransformableShapeItem'], None]] = None,
         on_reorder_cb: Optional[Callable[['TransformableShapeItem', str], None]] = None,
+        on_edit_text_cb: Optional[Callable[['TransformableShapeItem'], None]] = None,
         parent=None
     ):
         super().__init__(parent)
         self.shape_data = shape_data
-        self.shape_type = shape_data.shape_type  # 'rect', 'ellipse', 'line'
+        self.shape_type = shape_data.shape_type  # 'rect', 'ellipse', 'line', 'text'
         self.on_merge_raster_cb = on_merge_raster_cb
         self.on_delete_cb = on_delete_cb
         self.on_reorder_cb = on_reorder_cb
+        self.on_edit_text_cb = on_edit_text_cb
 
         # Geometry in local space
         if self.shape_type == "line":
@@ -91,6 +93,13 @@ class TransformableShapeItem(QGraphicsItem):
         self.orig_rotation = self.rotation()
         self.orig_p1_local = self.p1_local
         self.orig_p2_local = self.p2_local
+        self.is_dimmed = False
+
+    def set_dimmed(self, dimmed: bool):
+        """Dims selection outline & handles to 30% during ghost preview."""
+        if getattr(self, "is_dimmed", False) != dimmed:
+            self.is_dimmed = dimmed
+            self.update()
 
     def sync_to_data(self):
         """Synchronizes current transform back to ShapeItemData."""
@@ -156,12 +165,12 @@ class TransformableShapeItem(QGraphicsItem):
         if not self.isSelected():
             return HandleType.NONE
         handles = self._get_handle_rects()
-        rot_rect = handles[HandleType.ROTATE].adjusted(-4, -4, 4, 4)
+        rot_rect = handles[HandleType.ROTATE].adjusted(-6, -6, 6, 6)
         if rot_rect.contains(pt):
             return HandleType.ROTATE
 
         for ht, rect in handles.items():
-            if rect.adjusted(-3, -3, 3, 3).contains(pt):
+            if rect.adjusted(-5, -5, 5, 5).contains(pt):
                 return ht
         return HandleType.NONE
 
@@ -203,13 +212,28 @@ class TransformableShapeItem(QGraphicsItem):
             arr_mode = self.shape_data.meta.get("arrow_mode", "single")
             path = create_arrow_path(self.width, self.height, arr_mode, self.shape_data.meta)
             painter.drawPath(path)
+        elif self.shape_type == "text":
+            text_str = self.shape_data.meta.get("text", "")
+            font_size = int(self.shape_data.meta.get("font_size", 24))
+            font_family = self.shape_data.meta.get("font_family", "Malgun Gothic")
+            font_bold = self.shape_data.meta.get("font_bold", False)
+            font_italic = self.shape_data.meta.get("font_italic", False)
+            font = QFont(font_family, font_size)
+            font.setBold(font_bold)
+            font.setItalic(font_italic)
+            painter.setFont(font)
+            painter.setPen(pen)
+            if fill_c.alpha() > 0:
+                painter.fillRect(lr, brush)
+            painter.drawText(lr, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, text_str)
 
         if has_clip:
             painter.restore()
 
         # PowerPoint-style handles (drawn unclipped so user can always see and manipulate handles!)
         if self.isSelected():
-            border_pen = QPen(QColor(37, 99, 235), 1.0, Qt.PenStyle.DashLine)
+            dim_alpha = 76 if getattr(self, "is_dimmed", False) else 255
+            border_pen = QPen(QColor(37, 99, 235, dim_alpha), 1.0, Qt.PenStyle.DashLine)
             painter.setPen(border_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(lr)
@@ -222,26 +246,26 @@ class TransformableShapeItem(QGraphicsItem):
             else:
                 rot_top = QPointF(0, lr.top())
                 rot_center = QPointF(0, lr.top() - ROTATE_OFFSET)
-            painter.setPen(QPen(QColor(37, 99, 235), 1.0))
+            painter.setPen(QPen(QColor(37, 99, 235, dim_alpha), 1.0))
             painter.drawLine(rot_top, rot_center)
 
-            handle_pen = QPen(QColor(37, 99, 235), 1.5)
-            handle_brush = QBrush(QColor(255, 255, 255))
+            handle_pen = QPen(QColor(37, 99, 235, dim_alpha), 1.5)
+            handle_brush = QBrush(QColor(255, 255, 255, dim_alpha))
             painter.setPen(handle_pen)
             painter.setBrush(handle_brush)
 
             handles = self._get_handle_rects()
             for ht, rect in handles.items():
                 if ht == HandleType.ROTATE:
-                    painter.setBrush(QBrush(QColor(34, 197, 94)))
+                    painter.setBrush(QBrush(QColor(34, 197, 94, dim_alpha)))
                     painter.drawEllipse(rect)
                     painter.setBrush(handle_brush)
                 elif ht in (HandleType.LINE_P1, HandleType.LINE_P2):
-                    painter.setBrush(QBrush(QColor(239, 68, 68)))  # Red circular knobs for line endpoints
+                    painter.setBrush(QBrush(QColor(239, 68, 68, dim_alpha)))  # Red circular knobs for line endpoints
                     painter.drawEllipse(rect)
                     painter.setBrush(handle_brush)
                 elif ht == HandleType.CURVE:
-                    painter.setBrush(QBrush(QColor(245, 158, 11)))  # Amber knob for curvature control
+                    painter.setBrush(QBrush(QColor(245, 158, 11, dim_alpha)))  # Amber knob for curvature control
                     painter.drawEllipse(rect)
                     painter.setBrush(handle_brush)
                 else:
@@ -250,6 +274,10 @@ class TransformableShapeItem(QGraphicsItem):
     def contextMenuEvent(self, event):
         """Context menu on shape right-click."""
         menu = QMenu()
+        edit_text_act = None
+        if self.shape_type == "text":
+            edit_text_act = menu.addAction(I18N.tr("menu_edit_text"))
+            menu.addSeparator()
         merge_act = menu.addAction(I18N.tr("menu_merge_raster"))
         menu.addSeparator()
         front_act = menu.addAction(I18N.tr("menu_bring_front"))
@@ -257,8 +285,15 @@ class TransformableShapeItem(QGraphicsItem):
         menu.addSeparator()
         del_act = menu.addAction(I18N.tr("menu_del_shape"))
 
-        chosen = menu.exec(event.screenPos())
-        if chosen == merge_act and self.on_merge_raster_cb:
+        screen_pos = event.screenPos() if hasattr(event, "screenPos") else (event.globalPos() if hasattr(event, "globalPos") else event.pos())
+        chosen = menu.exec(screen_pos)
+        if not chosen:
+            event.accept()
+            return
+
+        if edit_text_act is not None and chosen == edit_text_act and self.on_edit_text_cb:
+            self.on_edit_text_cb(self)
+        elif chosen == merge_act and self.on_merge_raster_cb:
             self.on_merge_raster_cb(self)
         elif chosen == front_act and self.on_reorder_cb:
             self.on_reorder_cb(self, "front")
@@ -269,11 +304,16 @@ class TransformableShapeItem(QGraphicsItem):
         event.accept()
 
     def mouseDoubleClickEvent(self, event):
-        """Double-clicking shape immediately commits and merges it to the active raster layer."""
-        if event.button() == Qt.MouseButton.LeftButton and self.on_merge_raster_cb:
-            self.on_merge_raster_cb(self)
-            event.accept()
-            return
+        """Double-clicking shape immediately commits and merges it to the active raster layer, or opens text editor."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.shape_type == "text" and self.on_edit_text_cb:
+                self.on_edit_text_cb(self)
+                event.accept()
+                return
+            elif self.on_merge_raster_cb:
+                self.on_merge_raster_cb(self)
+                event.accept()
+                return
         super().mouseDoubleClickEvent(event)
 
     def mousePressEvent(self, event):
@@ -291,9 +331,23 @@ class TransformableShapeItem(QGraphicsItem):
                 self.orig_p2_local = QPointF(self.p2_local)
                 event.accept()
                 return
+            else:
+                self.active_handle = HandleType.NONE
+                self.drag_start_pos = event.pos()
+                self.drag_start_scene_pos = event.scenePos()
+                self.orig_pos = self.pos()
+                event.accept()
+                try:
+                    super().mousePressEvent(event)
+                except Exception:
+                    pass
+                return
 
         self.active_handle = HandleType.NONE
-        super().mousePressEvent(event)
+        try:
+            super().mousePressEvent(event)
+        except Exception:
+            pass
 
     def mouseMoveEvent(self, event):
         if self.active_handle != HandleType.NONE:
@@ -499,16 +553,32 @@ class TransformableShapeItem(QGraphicsItem):
                 event.accept()
                 return
 
-        super().mouseMoveEvent(event)
+        # Moving the shape body
+        if getattr(self, "drag_start_scene_pos", None) is not None:
+            delta = event.scenePos() - self.drag_start_scene_pos
+            self.setPos(self.orig_pos + delta)
+            self.sync_to_data()
+            self.update()
+            event.accept()
+            return
+
+        try:
+            super().mouseMoveEvent(event)
+        except Exception:
+            pass
         self.sync_to_data()
 
     def mouseReleaseEvent(self, event):
+        self.drag_start_scene_pos = None
         if self.active_handle != HandleType.NONE:
             self.active_handle = HandleType.NONE
             self.sync_to_data()
             event.accept()
             return
-        super().mouseReleaseEvent(event)
+        try:
+            super().mouseReleaseEvent(event)
+        except Exception:
+            pass
         self.sync_to_data()
 
     def hoverMoveEvent(self, event):
@@ -528,5 +598,15 @@ class TransformableShapeItem(QGraphicsItem):
         elif handle in (HandleType.MID_LEFT, HandleType.MID_RIGHT):
             self.setCursor(QCursor(Qt.CursorShape.SizeHorCursor))
         else:
-            self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor if self.isSelected() else Qt.CursorShape.ArrowCursor))
-        super().hoverMoveEvent(event)
+            self.setCursor(QCursor(Qt.CursorShape.SizeAllCursor))
+        try:
+            super().hoverMoveEvent(event)
+        except TypeError:
+            pass
+
+    def hoverLeaveEvent(self, event):
+        self.unsetCursor()
+        try:
+            super().hoverLeaveEvent(event)
+        except TypeError:
+            pass

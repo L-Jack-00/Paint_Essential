@@ -9,16 +9,16 @@ import math
 import numpy as np
 from PyQt6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QGraphicsItem, QApplication, QMenu, QFrame
+    QGraphicsItem, QApplication, QMenu, QFrame, QDialog
 )
 from PyQt6.QtCore import (
     Qt, QPointF, pyqtSignal, QRectF, QLineF, QRect, QPoint,
-    QBuffer, QByteArray, QMimeData, QIODevice
+    QBuffer, QByteArray, QMimeData, QIODevice, QTimer
 )
 from PyQt6.QtGui import (
     QPainter, QPen, QBrush, QColor, QPixmap, QImage,
-    QMouseEvent, QKeyEvent, QWheelEvent,
-    QPainterPath, QTransform, QPolygonF, QFont
+    QMouseEvent, QKeyEvent, QWheelEvent, QContextMenuEvent,
+    QPainterPath, QTransform, QPolygonF, QFont, QFontMetrics
 )
 from core.layer_manager import LayerManager, LayerType, ShapeItemData
 from core.input_safety import InputSafetyTracker, InputMode
@@ -113,13 +113,22 @@ class CanvasView(QGraphicsView):
         self.setScene(self.scene)
         self.raster_items: Dict[str, QGraphicsPixmapItem] = {}
         self.shape_items: Dict[str, TransformableShapeItem] = {}
+        self.current_font_size: int = 24
+        self.current_font_family: str = "Malgun Gothic"
 
         # View configuration
         self.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing, True)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._suppress_context_menu = False
+        self._cached_composite: Optional[QImage] = None
+        self._last_status_pos = None
+        self.canvas_modified.connect(self.invalidate_composite_cache)
         self.current_theme = "light"
 
         # Outer canvas neutral background
@@ -145,8 +154,20 @@ class CanvasView(QGraphicsView):
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
         self.horizontalScrollBar().valueChanged.connect(lambda _: self.hud.activate_hud())
-        self.verticalScrollBar().valueChanged.connect(lambda _: self.hud.activate_hud())
         self.zoom_changed.connect(self.hud.update_zoom)
+
+        # Ghost Indicator for shape commit preview
+        self.ghost_indicator_enabled: bool = True
+        self.is_ghost_preview_active: bool = False
+        self._ghost_cursor_pos: Optional[QPoint] = None
+        self.ghost_dwell_timer = QTimer(self)
+        self.ghost_dwell_timer.setSingleShot(True)
+        self.ghost_dwell_timer.timeout.connect(self._on_ghost_dwell_timeout)
+
+    def set_ghost_indicator_enabled(self, enabled: bool):
+        self.ghost_indicator_enabled = bool(enabled)
+        if not self.ghost_indicator_enabled:
+            self._deactivate_ghost_preview()
 
     @property
     def toast(self):
@@ -193,6 +214,82 @@ class CanvasView(QGraphicsView):
                 and self._loupe_cursor_pos is not None
                 and self._loupe_scene_pt is not None):
             self._draw_pixel_loupe()
+        if getattr(self, "is_ghost_preview_active", False) and getattr(self, "_ghost_cursor_pos", None) is not None:
+            self._draw_ghost_badge()
+
+    def _on_ghost_dwell_timeout(self):
+        if not getattr(self, "ghost_indicator_enabled", True):
+            self._deactivate_ghost_preview()
+            return
+        selected_shapes = [item for item in self.scene.selectedItems() if isinstance(item, TransformableShapeItem)]
+        if not selected_shapes or self.input_safety.is_mouse_down:
+            self._deactivate_ghost_preview()
+            return
+        self.is_ghost_preview_active = True
+        for s in selected_shapes:
+            s.set_dimmed(True)
+        self.viewport().update()
+
+    def _deactivate_ghost_preview(self):
+        if hasattr(self, "ghost_dwell_timer"):
+            self.ghost_dwell_timer.stop()
+        if getattr(self, "is_ghost_preview_active", False):
+            self.is_ghost_preview_active = False
+            for item in self.scene.items():
+                if isinstance(item, TransformableShapeItem) and getattr(item, "is_dimmed", False):
+                    item.set_dimmed(False)
+            self.viewport().update()
+        self._ghost_cursor_pos = None
+
+    def _draw_ghost_badge(self):
+        if not self._ghost_cursor_pos:
+            return
+        pos = self._ghost_cursor_pos
+        text = I18N.tr("ghost_commit_badge") if "ghost_commit_badge" in I18N.TRANSLATIONS else "✓ 클릭 시 픽셀 고정"
+        font = QFont("Malgun Gothic", 8, QFont.Weight.Bold)
+
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        text_w = fm.horizontalAdvance(text)
+        text_h = fm.height()
+
+        pad_x = 10
+        pad_y = 4
+        badge_w = text_w + pad_x * 2
+        badge_h = text_h + pad_y * 2
+
+        bx = pos.x() + 16
+        by = pos.y() + 12
+        vp_rect = self.viewport().rect()
+        if bx + badge_w > vp_rect.right() - 8:
+            bx = pos.x() - badge_w - 8
+        if by + badge_h > vp_rect.bottom() - 8:
+            by = pos.y() - badge_h - 8
+        if bx < 8:
+            bx = 8
+        if by < 8:
+            by = 8
+
+        badge_rect = QRectF(bx, by, badge_w, badge_h)
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        painter.setBrush(QBrush(QColor(15, 23, 42, 140)))
+        painter.drawRoundedRect(badge_rect, 11.0, 11.0)
+
+        painter.setPen(QColor(255, 255, 255, 235))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+
+    def invalidate_composite_cache(self):
+        """Invalidates cached composite QImage when canvas contents change."""
+        self._cached_composite = None
+
+    def get_composite_image(self) -> QImage:
+        """Returns cached composite image or renders a new one if dirty."""
+        if self._cached_composite is None:
+            self._cached_composite = self.layer_manager.composite_to_image()
+        return self._cached_composite
 
     def _draw_pixel_loupe(self):
         """
@@ -207,7 +304,7 @@ class CanvasView(QGraphicsView):
         sc_x = int(math.floor(sc_pt.x()))
         sc_y = int(math.floor(sc_pt.y()))
 
-        composite = self.layer_manager.composite_to_image()
+        composite = self.get_composite_image()
         c_w, c_h = composite.width(), composite.height()
 
         grid_dim = 11
@@ -352,7 +449,8 @@ class CanvasView(QGraphicsView):
             QPen(border_color, 1),
             QBrush(Qt.BrushStyle.NoBrush)
         )
-        self.border_rect.setZValue(9999)
+        self.border_rect.setZValue(-50)
+        self.border_rect.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
 
         # 3. Build items from layers bottom to top
         for idx, layer in enumerate(self.layer_manager.layers):
@@ -416,7 +514,8 @@ class CanvasView(QGraphicsView):
             shape_data,
             on_merge_raster_cb=self._on_shape_merge_requested,
             on_delete_cb=self._on_shape_delete_requested,
-            on_reorder_cb=self._on_shape_reorder_requested
+            on_reorder_cb=self._on_shape_reorder_requested,
+            on_edit_text_cb=self._on_edit_text_requested
         )
         item.setZValue(z_value)
         item.setVisible(visible)
@@ -425,14 +524,16 @@ class CanvasView(QGraphicsView):
         self.scene.addItem(item)
         return item
 
-    def update_raster_pixmap(self, layer_id: str):
+    def update_raster_pixmap(self, layer_id: str, notify_modified: bool = True):
         layer = self.layer_manager.get_layer(layer_id)
         if layer and layer.raster_image and layer.id in self.raster_items:
             eff_vis = self.layer_manager.is_layer_effectively_visible(layer.id)
             pix = QPixmap.fromImage(layer.raster_image)
             self.raster_items[layer.id].setPixmap(pix)
             self.raster_items[layer.id].setVisible(eff_vis)
-            self.canvas_modified.emit()
+            self.invalidate_composite_cache()
+            if notify_modified:
+                self.canvas_modified.emit()
 
     # --- Mouse & Keyboard Event Handlers ---
 
@@ -447,6 +548,7 @@ class CanvasView(QGraphicsView):
             event.accept()
             return
 
+        self.setFocus()
         raw_scene_pt = self.mapToScene(event.pos())
         scene_pt = self.snap_coordinate(raw_scene_pt)
 
@@ -528,8 +630,22 @@ class CanvasView(QGraphicsView):
                 event.accept()
                 return
 
+            elif mode == InputMode.TEXT:
+                clicked_item = self.itemAt(event.pos())
+                if isinstance(clicked_item, TransformableShapeItem) and clicked_item.shape_type == "text":
+                    self._on_edit_text_requested(clicked_item)
+                else:
+                    self._create_text_at(scene_pt)
+                event.accept()
+                return
+
             # Context Menu is ONLY shown for selection tools (or tools without dedicated right-click)
             elif self.selection_rect or mode in (InputMode.SELECT, InputMode.SELECT_AREA, InputMode.SELECT_LASSO, InputMode.SELECT_WAND):
+                clicked_item = self.itemAt(event.pos())
+                if isinstance(clicked_item, TransformableShapeItem):
+                    super().mousePressEvent(event)
+                    event.accept()
+                    return
                 self._show_selection_context_menu(event.globalPosition().toPoint())
                 event.accept()
                 return
@@ -548,7 +664,9 @@ class CanvasView(QGraphicsView):
                 if s_item._hit_test_handle(local_pt) != HandleType.NONE:
                     hit_handle = True
                     break
-                if s_item.contains(local_pt):
+                if (s_item.contains(local_pt)
+                        or s_item.local_rect().adjusted(-6, -6, 6, 6).contains(local_pt)
+                        or s_item.boundingRect().adjusted(-2, -2, 2, 2).contains(local_pt)):
                     hit_shape_body = True
                     break
 
@@ -558,15 +676,27 @@ class CanvasView(QGraphicsView):
                 if m_handle != HandleType.NONE or m_border:
                     hit_handle = True
 
-            if hit_handle:
+            if hit_handle or hit_shape_body:
                 self.is_shape_handle_dragging = True
                 super().mousePressEvent(event)
                 event.accept()
                 return
 
-            # Clicking outside of selected shapes deselects them without auto-rasterizing
+            # Clicking outside of selected shapes commits & merges them to active raster layer if enabled,
+            # or clears selection if disabled.
             if selected_shapes and not hit_shape_body and not hit_handle:
-                self.scene.clearSelection()
+                self._deactivate_ghost_preview()
+                if getattr(self, "ghost_indicator_enabled", True):
+                    for s_item in selected_shapes:
+                        self.merge_shape_to_raster(s_item.shape_data.id)
+                    self.status_message.emit("도형이 레이어에 병합되었습니다.")
+                    event.accept()
+                    return
+                else:
+                    self.scene.clearSelection()
+                    self.status_message.emit("선택이 해제되었습니다.")
+                    event.accept()
+                    return
 
             self.input_safety.set_mouse_down(True)
             self.drag_start_pt = scene_pt
@@ -592,6 +722,16 @@ class CanvasView(QGraphicsView):
             elif mode == InputMode.STEP_BADGE:
                 self.commit_floating_selection_if_any()
                 self._apply_step_badge(scene_pt)
+                event.accept()
+                return
+
+            elif mode == InputMode.TEXT:
+                self.commit_floating_selection_if_any()
+                clicked_item = self.itemAt(event.pos())
+                if isinstance(clicked_item, TransformableShapeItem) and clicked_item.shape_type == "text":
+                    self._on_edit_text_requested(clicked_item)
+                else:
+                    self._create_text_at(scene_pt)
                 event.accept()
                 return
 
@@ -670,7 +810,10 @@ class CanvasView(QGraphicsView):
 
         raw_scene_pt = self.mapToScene(event.pos())
         scene_pt = self.snap_coordinate(raw_scene_pt)
-        self.status_message.emit(f"X: {int(scene_pt.x())}, Y: {int(scene_pt.y())} px")
+        cur_x, cur_y = int(scene_pt.x()), int(scene_pt.y())
+        if (cur_x, cur_y) != getattr(self, "_last_status_pos", None):
+            self._last_status_pos = (cur_x, cur_y)
+            self.status_message.emit(f"X: {cur_x}, Y: {cur_y} px")
 
         # Eyedropper Loupe overlay tracking
         if self.input_safety.current_mode == InputMode.EYEDROPPER:
@@ -715,12 +858,36 @@ class CanvasView(QGraphicsView):
             elif mode == InputMode.SELECT:
                 super().mouseMoveEvent(event)
         else:
+            # Ghost Indicator tracking when hovering empty canvas while shapes are selected
+            selected_shapes = [item for item in self.scene.selectedItems() if isinstance(item, TransformableShapeItem)]
+            if selected_shapes and getattr(self, "ghost_indicator_enabled", True):
+                is_over_shape = False
+                for s in selected_shapes:
+                    local_pt = s.mapFromScene(raw_scene_pt)
+                    if s.contains(local_pt) or s._hit_test_handle(local_pt) != HandleType.NONE:
+                        is_over_shape = True
+                        break
+
+                if not is_over_shape:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
+                    self._ghost_cursor_pos = event.pos()
+                    if self.is_ghost_preview_active:
+                        self.viewport().update()
+                    else:
+                        self.ghost_dwell_timer.start(180)
+                else:
+                    self._deactivate_ghost_preview()
+            else:
+                self._deactivate_ghost_preview()
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if self.is_middle_panning:
             self.is_middle_panning = False
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if self.input_safety.is_space_pressed:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
             event.accept()
             return
 
@@ -742,10 +909,14 @@ class CanvasView(QGraphicsView):
             if (mode in (InputMode.BRUSH, InputMode.PENCIL, InputMode.ERASER)) or self.is_right_erasing:
                 self._commit_raster_stroke()
                 self.is_right_erasing = False
+                if event.button() == Qt.MouseButton.RightButton:
+                    self._suppress_context_menu = True
 
             elif mode in (InputMode.SHAPE_RECT, InputMode.SHAPE_ROUNDED_RECT, InputMode.SHAPE_ELLIPSE, InputMode.SHAPE_LINE, InputMode.SHAPE_ARROW):
                 self._commit_shape(self.drag_start_pt, scene_pt, mode, event.modifiers(), is_swapped=self.is_shape_swapped)
                 self.is_shape_swapped = False
+                if event.button() == Qt.MouseButton.RightButton:
+                    self._suppress_context_menu = True
 
             elif mode == InputMode.MOSAIC:
                 if self.drag_start_pt:
@@ -784,7 +955,22 @@ class CanvasView(QGraphicsView):
         self.drag_start_pt = None
         super().mouseReleaseEvent(event)
 
+    def contextMenuEvent(self, event: QContextMenuEvent):
+        """Suppress context menu during drawing tools and right-click shape creation."""
+        if getattr(self, "_suppress_context_menu", False):
+            self._suppress_context_menu = False
+            event.accept()
+            return
+
+        mode = self.input_safety.current_mode
+        if mode not in (InputMode.SELECT, InputMode.SELECT_AREA, InputMode.SELECT_LASSO, InputMode.SELECT_WAND) and not self.selection_rect:
+            event.accept()
+            return
+
+        super().contextMenuEvent(event)
+
     def leaveEvent(self, event):
+        self._deactivate_ghost_preview()
         self._loupe_cursor_pos = None
         self._loupe_scene_pt = None
         self.viewport().update()
@@ -868,7 +1054,7 @@ class CanvasView(QGraphicsView):
         painter.drawLine(p1.toPoint(), p2.toPoint())
         painter.end()
 
-        self.update_raster_pixmap(active_layer.id)
+        self.update_raster_pixmap(active_layer.id, notify_modified=False)
 
     def _commit_raster_stroke(self):
         active_layer = self.layer_manager.get_active_layer()
@@ -894,6 +1080,7 @@ class CanvasView(QGraphicsView):
 
         self.history_manager.record_step("드로잉 스트로크", undo, redo, estimated_bytes=estimated_bytes)
         self.stroke_before_image = None
+        self.canvas_modified.emit()
 
     # --- Flood Fill ---
 
@@ -1489,6 +1676,195 @@ class CanvasView(QGraphicsView):
             self.layer_manager.send_shape_to_back(shape_id)
         self.rebuild_scene()
 
+    # --- Text Tool Implementation ---
+
+    def _create_text_at(self, scene_pt: QPointF):
+        from ui.dialogs.text_edit_dialog import TextEditDialog
+        dlg = TextEditDialog(
+            initial_text="",
+            initial_font_family=getattr(self, "current_font_family", "Malgun Gothic"),
+            initial_font_size=getattr(self, "current_font_size", 24),
+            initial_color=self.primary_color,
+            parent=self.window()
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            try:
+                props = dlg.get_properties()
+                text = props.get("text", "")
+                if not text or not text.strip():
+                    return
+                font_family = props.get("font_family", "Malgun Gothic")
+                font_size = int(props.get("font_size", 24))
+                font_bold = bool(props.get("font_bold", False))
+                font_italic = bool(props.get("font_italic", False))
+                color = props.get("color", self.primary_color)
+                if not isinstance(color, QColor) or not color.isValid():
+                    color = self.primary_color
+                self.current_font_size = font_size
+                self.current_font_family = font_family
+                self.primary_color = color
+                self.color_picked.emit(color)
+
+                font = QFont(font_family, font_size)
+                font.setBold(font_bold)
+                font.setItalic(font_italic)
+                fm = QFontMetrics(font)
+                rect = fm.boundingRect(QRect(0, 0, 100000, 100000), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, text)
+                w = max(60, rect.width() + 16)
+                h = max(30, rect.height() + 10)
+
+                import uuid
+                shape_id = f"text_{uuid.uuid4().hex[:8]}"
+                shape_data = ShapeItemData(
+                    id=shape_id,
+                    shape_type="text",
+                    x=float(scene_pt.x()),
+                    y=float(scene_pt.y()),
+                    width=float(w),
+                    height=float(h),
+                    stroke_color=color.name(),
+                    fill_color="transparent",
+                    stroke_width=1,
+                    meta={
+                        "text": text,
+                        "font_size": font_size,
+                        "font_family": font_family,
+                        "font_bold": font_bold,
+                        "font_italic": font_italic,
+                    }
+                )
+                shape_layer = self.layer_manager.add_shape_to_default_layer(shape_data)
+                item = self._create_shape_graphics_item(shape_data, visible=shape_layer.visible)
+                self.scene.clearSelection()
+                item.setSelected(True)
+
+                def undo():
+                    lay = self.layer_manager.get_default_shape_layer()
+                    if shape_data in lay.shapes:
+                        lay.shapes.remove(shape_data)
+                    if item in self.scene.items():
+                        self.scene.removeItem(item)
+                    if shape_id in self.shape_items:
+                        del self.shape_items[shape_id]
+                    self.canvas_modified.emit()
+
+                def redo():
+                    lay = self.layer_manager.get_default_shape_layer()
+                    lay.shapes.append(shape_data)
+                    self._create_shape_graphics_item(shape_data, visible=lay.visible)
+                    self.canvas_modified.emit()
+
+                self.history_manager.record_step("텍스트 추가", undo, redo, estimated_bytes=1024)
+                self.status_message.emit(I18N.tr("status_text_created"))
+                self.canvas_modified.emit()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.status_message.emit(f"텍스트 생성 오류: {e}")
+
+    def _on_edit_text_requested(self, item: TransformableShapeItem):
+        shape_data = item.shape_data
+        old_meta = dict(shape_data.meta)
+        old_w = shape_data.width
+        old_h = shape_data.height
+        old_color = shape_data.stroke_color
+
+        from ui.dialogs.text_edit_dialog import TextEditDialog
+        dlg = TextEditDialog(
+            initial_text=old_meta.get("text", ""),
+            initial_font_family=old_meta.get("font_family", "Malgun Gothic"),
+            initial_font_size=int(old_meta.get("font_size", 24)),
+            initial_bold=bool(old_meta.get("font_bold", False)),
+            initial_italic=bool(old_meta.get("font_italic", False)),
+            initial_color=QColor(old_color),
+            parent=self.window()
+        )
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            try:
+                props = dlg.get_properties()
+                new_text = props.get("text", "")
+                if not new_text or not new_text.strip():
+                    return
+                new_family = props.get("font_family", "Malgun Gothic")
+                new_size = int(props.get("font_size", 24))
+                new_bold = bool(props.get("font_bold", False))
+                new_italic = bool(props.get("font_italic", False))
+                new_color = props.get("color", self.primary_color)
+                if not isinstance(new_color, QColor) or not new_color.isValid():
+                    new_color = self.primary_color
+
+                font = QFont(new_family, new_size)
+                font.setBold(new_bold)
+                font.setItalic(new_italic)
+                fm = QFontMetrics(font)
+                rect = fm.boundingRect(QRect(0, 0, 100000, 100000), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, new_text)
+                new_w = max(60, rect.width() + 16)
+                new_h = max(30, rect.height() + 10)
+
+                new_meta = dict(old_meta)
+                new_meta.update({
+                    "text": new_text,
+                    "font_family": new_family,
+                    "font_size": new_size,
+                    "font_bold": new_bold,
+                    "font_italic": new_italic,
+                })
+
+                shape_data.meta = new_meta
+                shape_data.width = float(new_w)
+                shape_data.height = float(new_h)
+                shape_data.stroke_color = new_color.name()
+                item.width = float(new_w)
+                item.height = float(new_h)
+                item.update()
+
+                def undo():
+                    shape_data.meta = dict(old_meta)
+                    shape_data.width = float(old_w)
+                    shape_data.height = float(old_h)
+                    shape_data.stroke_color = old_color
+                    item.width = float(old_w)
+                    item.height = float(old_h)
+                    item.update()
+                    self.canvas_modified.emit()
+
+                def redo():
+                    shape_data.meta = dict(new_meta)
+                    shape_data.width = float(new_w)
+                    shape_data.height = float(new_h)
+                    shape_data.stroke_color = new_color.name()
+                    item.width = float(new_w)
+                    item.height = float(new_h)
+                    item.update()
+                    self.canvas_modified.emit()
+
+                self.history_manager.record_step("텍스트 수정", undo, redo, estimated_bytes=1024)
+                self.canvas_modified.emit()
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                self.status_message.emit(f"텍스트 수정 오류: {e}")
+
+    def update_selected_text_font_size(self, size: int):
+        for item in self.scene.selectedItems():
+            if isinstance(item, TransformableShapeItem) and item.shape_type == "text":
+                item.shape_data.meta["font_size"] = size
+                family = item.shape_data.meta.get("font_family", "Malgun Gothic")
+                bold = item.shape_data.meta.get("font_bold", False)
+                italic = item.shape_data.meta.get("font_italic", False)
+                text = item.shape_data.meta.get("text", "")
+                font = QFont(family, size)
+                font.setBold(bold)
+                font.setItalic(italic)
+                fm = QFontMetrics(font)
+                rect = fm.boundingRect(QRect(0, 0, 4000, 4000), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, text)
+                item.width = float(max(60, rect.width() + 16))
+                item.height = float(max(30, rect.height() + 10))
+                item.shape_data.width = item.width
+                item.shape_data.height = item.height
+                item.update()
+                self.canvas_modified.emit()
+
     # --- MS Paint Style Marquee Area Selection ---
 
     def _on_marquee_rect_changed(self, rect: QRectF):
@@ -1923,6 +2299,20 @@ class CanvasView(QGraphicsView):
             self.scene.clearSelection()
             self.floating_selection.setSelected(True)
 
+    def delete_selected_content(self):
+        """Unified deletion for keyboard Delete shortcut or Edit menu."""
+        did_delete = False
+        if self.floating_selection or self.selection_rect:
+            self.delete_selection()
+            did_delete = True
+        else:
+            selected_shapes = [itm for itm in self.scene.selectedItems() if isinstance(itm, TransformableShapeItem)]
+            for itm in selected_shapes:
+                self._on_shape_delete_requested(itm)
+                did_delete = True
+        if did_delete:
+            self.canvas_modified.emit()
+
     def delete_selection(self):
         if self.floating_selection:
             self.scene.removeItem(self.floating_selection)
@@ -1930,22 +2320,54 @@ class CanvasView(QGraphicsView):
             self._record_float_history("선택 영역 삭제")
             self.canvas_modified.emit()
         elif self.selection_rect:
+            norm_rect = self.selection_rect.normalized()
+
+            # 1. Delete vector shapes inside or overlapping the selection rect
+            shapes_to_delete = []
+            for item in list(self.scene.items()):
+                if isinstance(item, TransformableShapeItem):
+                    item_rect = item.sceneBoundingRect()
+                    if norm_rect.contains(item_rect) or norm_rect.contains(item_rect.center()) or norm_rect.intersects(item_rect):
+                        shapes_to_delete.append(item)
+            for s in shapes_to_delete:
+                self._on_shape_delete_requested(s)
+
+            # 2. Find target raster layer to delete pixels from
             active_layer = self.layer_manager.get_active_layer()
-            if active_layer and active_layer.raster_image:
+            target_raster_layer = None
+            if active_layer and active_layer.layer_type == LayerType.RASTER and active_layer.raster_image:
+                target_raster_layer = active_layer
+            else:
+                if active_layer:
+                    target_raster_layer = self.layer_manager.find_raster_layer_below(active_layer.id)
+                if not target_raster_layer:
+                    for lay in self.layer_manager.layers:
+                        if lay.layer_type == LayerType.RASTER and lay.raster_image:
+                            target_raster_layer = lay
+                            break
+
+            if target_raster_layer and target_raster_layer.raster_image:
                 self._float_origin = {
-                    "layer_id": active_layer.id,
-                    "before_img": active_layer.raster_image.copy(),
+                    "layer_id": target_raster_layer.id,
+                    "before_img": target_raster_layer.raster_image.copy(),
                     "sel_rect": QRectF(self.selection_rect),
                 }
-                rx, ry, rw, rh = int(self.selection_rect.x()), int(self.selection_rect.y()), int(self.selection_rect.width()), int(self.selection_rect.height())
-                p = QPainter(active_layer.raster_image)
-                p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
-                p.fillRect(rx, ry, rw, rh, QColor(0, 0, 0, 0))
-                p.end()
-                self.update_raster_pixmap(active_layer.id)
-            self.clear_selection_marquee()
-            self._record_float_history("선택 영역 삭제")
-            self.canvas_modified.emit()
+                layer_rect = norm_rect.intersected(
+                    QRectF(0, 0, target_raster_layer.raster_image.width(), target_raster_layer.raster_image.height())
+                )
+                if not layer_rect.isEmpty():
+                    rx, ry, rw, rh = int(layer_rect.x()), int(layer_rect.y()), int(layer_rect.width()), int(layer_rect.height())
+                    p = QPainter(target_raster_layer.raster_image)
+                    if self.transparent_selection_enabled:
+                        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+                        p.fillRect(rx, ry, rw, rh, QColor(0, 0, 0, 0))
+                    else:
+                        p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+                        p.fillRect(rx, ry, rw, rh, self.secondary_color)
+                    p.end()
+                    self.update_raster_pixmap(target_raster_layer.id)
+                self._record_float_history("선택 영역 내 이미지 삭제")
+                self.canvas_modified.emit()
 
     def select_all(self):
         self.commit_floating_selection_if_any()
@@ -1955,7 +2377,7 @@ class CanvasView(QGraphicsView):
 
     def _pick_color_at(self, pt: QPointF, is_secondary: bool = False):
         """Samples pixel color from composite layers and emits signal."""
-        composite = self.layer_manager.composite_to_image()
+        composite = self.get_composite_image()
         x, y = int(pt.x()), int(pt.y())
         if 0 <= x < composite.width() and 0 <= y < composite.height():
             c = composite.pixelColor(x, y)
@@ -2112,6 +2534,12 @@ class CanvasView(QGraphicsView):
                 painter.setPen(major_pen)
                 painter.drawLines(major_lines)
 
+        # 3. Canvas boundary border
+        border_color = QColor(52, 68, 96) if getattr(self, "current_theme", "light") == "dark" else QColor(160, 165, 175)
+        border_pen = QPen(border_color, 1)
+        painter.setPen(border_pen)
+        painter.drawRect(canvas_rect)
+
         painter.restore()
 
     def wheelEvent(self, event: QWheelEvent):
@@ -2184,18 +2612,9 @@ class CanvasView(QGraphicsView):
             self.input_safety.set_space_pressed(True)
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         elif key == Qt.Key.Key_Delete:
-            # Delete selection or selected vector shapes
-            if self.floating_selection or self.selection_rect:
-                self.delete_selection()
-            else:
-                selected = self.scene.selectedItems()
-                for itm in selected:
-                    shape_id = itm.data(0)
-                    if shape_id:
-                        shape_layer = self.layer_manager.get_default_shape_layer()
-                        shape_layer.shapes = [s for s in shape_layer.shapes if s.id != shape_id]
-                    self.scene.removeItem(itm)
-                self.canvas_modified.emit()
+            self.delete_selected_content()
+            event.accept()
+            return
         else:
             super().keyPressEvent(event)
 

@@ -13,7 +13,7 @@ import unittest
 import math
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QImage, QColor, QKeyEvent, QMouseEvent
-from PyQt6.QtCore import Qt, QRect, QPointF, QPoint, QMimeData, QByteArray, QBuffer
+from PyQt6.QtCore import Qt, QRect, QRectF, QPointF, QPoint, QMimeData, QByteArray, QBuffer
 
 from core.layer_manager import LayerManager, LayerType, ShapeItemData
 from core.history_manager import HistoryManager
@@ -220,9 +220,8 @@ class TestV7Features(unittest.TestCase):
         )
         self.cv.mousePressEvent(click_outside)
 
-        # Shape should NOT be automatically baked to raster - remains in shape layer!
-        self.assertEqual(len(shape_layer.shapes), 1)
-        self.assertEqual(len(self.cv.scene.selectedItems()), 0)
+        # Shape is automatically baked into raster upon clicking outside
+        self.assertEqual(len(shape_layer.shapes), 0)
 
     def test_shape_double_click_merge(self):
         self.cv._commit_shape(QPointF(10, 10), QPointF(50, 50), InputMode.SHAPE_RECT)
@@ -389,6 +388,342 @@ class TestV7Features(unittest.TestCase):
         self.assertIsNotNone(self.lm.get_layer(layer2.id))
         self.assertEqual(layer1.raster_image.pixelColor(50, 50), QColor(0, 255, 0, 255))
 
+    # 8. Text Tool Tests
+    def test_text_shape_layer_creation_and_rendering(self):
+        """Verifies text shape layer creation, layer naming, and rasterization."""
+        name = self.lm.generate_new_shape_layer_name("text")
+        self.assertEqual(name, "텍스트 1")
+
+        text_item = ShapeItemData(
+            id="text_1",
+            shape_type="text",
+            x=20,
+            y=30,
+            width=100,
+            height=40,
+            stroke_color="#ff0000",
+            meta={
+                "text": "Hello World",
+                "font_size": 20,
+                "font_bold": True,
+                "font_family": "Arial",
+            }
+        )
+        layer = self.lm.add_shape_layer(text_item)
+        self.assertEqual(layer.name, "텍스트 1")
+        self.assertEqual(layer.layer_type, LayerType.SHAPE)
+        self.assertEqual(layer.shapes[0].meta["text"], "Hello World")
+        self.assertTrue(layer.shapes[0].meta["font_bold"])
+
+        # Test rendering to painter
+        rendered_img = QImage(200, 150, QImage.Format.Format_ARGB32_Premultiplied)
+        rendered_img.fill(0)
+        from PyQt6.QtGui import QPainter
+        p = QPainter(rendered_img)
+        self.lm._render_shape_to_painter(p, text_item)
+        p.end()
+
+        # Check that some pixels were rendered (non-zero alpha)
+        has_colored_pixel = False
+        for y in range(25, 75):
+            for x in range(20, 120):
+                if rendered_img.pixelColor(x, y).alpha() > 0:
+                    has_colored_pixel = True
+                    break
+            if has_colored_pixel:
+                break
+        self.assertTrue(has_colored_pixel, "Rendered text should produce visible pixels")
+
+    def test_text_update_font_size(self):
+        """Verifies dynamically updating selected text font size in CanvasView."""
+        text_item = ShapeItemData(
+            id="text_dyn",
+            shape_type="text",
+            x=10,
+            y=10,
+            width=80,
+            height=30,
+            stroke_color="#0000ff",
+            meta={
+                "text": "Test Font Size",
+                "font_size": 16,
+            }
+        )
+        self.lm.add_shape_layer(text_item)
+        self.cv.rebuild_scene()
+
+        # Select the text item
+        graphics_item = self.cv.shape_items.get("text_dyn")
+        self.assertIsNotNone(graphics_item)
+        self.cv.scene.clearSelection()
+        graphics_item.setSelected(True)
+
+        # Update font size to 36
+        old_w = graphics_item.width
+        old_h = graphics_item.height
+        self.cv.update_selected_text_font_size(36)
+
+        # ShapeItemData and TransformableShapeItem should have new font size and larger bounds
+        self.assertEqual(text_item.meta["font_size"], 36)
+        self.assertEqual(graphics_item.shape_data.meta["font_size"], 36)
+        self.assertGreater(graphics_item.width, old_w)
+        self.assertGreater(graphics_item.height, old_h)
+
+    def test_text_bake_into_raster_layer_with_undo(self):
+        """Verifies text layer merges into the raster layer directly below, with full undo."""
+        bg = self.lm.get_layer("bg_layer")
+        bg.raster_image.fill(QColor(255, 255, 255, 255))
+
+        text_item = ShapeItemData(
+            id="text_bake",
+            shape_type="text",
+            x=10,
+            y=10,
+            width=80,
+            height=30,
+            stroke_color="#ff0000",
+            meta={
+                "text": "BakeMe",
+                "font_size": 20,
+            }
+        )
+        self.lm.add_shape_layer(text_item)
+        self.cv.rebuild_scene()
+
+        # Merge down text shape
+        self.cv.merge_shape_to_raster("text_bake")
+
+        # Text shape item should be removed from scene and layer manager
+        self.assertNotIn("text_bake", self.cv.shape_items)
+        self.assertIsNone(self.lm.get_layer("text_bake"))
+
+        # Raster layer should have rendered text (red-tinted pixels)
+        has_red = False
+        for y in range(10, 40):
+            for x in range(10, 90):
+                c = bg.raster_image.pixelColor(x, y)
+                if c.red() > 200 and c.green() < 100 and c.blue() < 100:
+                    has_red = True
+                    break
+            if has_red:
+                break
+        self.assertTrue(has_red, "Raster layer should contain baked text pixels")
+
+        # Undo should restore the text shape layer
+        self.assertTrue(self.history.can_undo)
+        self.history.undo()
+        self.assertIn("text_bake", self.cv.shape_items)
+        self.assertIsNotNone(self.lm.get_layer("text_bake"))
+
+    def test_main_window_text_tool_integration(self):
+        """Verifies MainWindow tool palette, action, and threshold controls for Text Tool."""
+        from ui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            self.assertIn(InputMode.TEXT, win.tool_actions)
+            self.assertIn(InputMode.TEXT, win.tool_buttons)
+
+            # Trigger text tool
+            win.tool_actions[InputMode.TEXT].trigger()
+            self.assertEqual(win.input_safety.current_mode, InputMode.TEXT)
+            self.assertIn("글꼴 크기", win.threshold_label.text())
+            self.assertEqual(win.threshold_spin.minimum(), 8)
+            self.assertEqual(win.threshold_spin.maximum(), 144)
+            self.assertEqual(win.threshold_spin.suffix(), " pt")
+
+            # Changing font size via threshold_spin
+            win.threshold_spin.setValue(32)
+            self.assertEqual(win.current_font_size, 32)
+            if win.canvas_view:
+                self.assertEqual(win.canvas_view.current_font_size, 32)
+        finally:
+            win.close()
+
+    def test_text_paste_and_paint_without_crash(self):
+        """Verifies creating and painting a text item (including multiline pasted text) renders without crash."""
+        from PyQt6.QtWidgets import QStyleOptionGraphicsItem
+        from PyQt6.QtGui import QPainter
+        from unittest.mock import patch
+        from ui.dialogs.text_edit_dialog import TextEditDialog
+
+        # 1. Direct paint test (verifies QFont import in ui/shape_items.py)
+        s_data = ShapeItemData(
+            id="text_paint_test",
+            shape_type="text",
+            x=10,
+            y=10,
+            width=120,
+            height=60,
+            stroke_color="#123456",
+            meta={
+                "text": "Multi-line\npasted text\ntest!",
+                "font_size": 20,
+                "font_family": "Malgun Gothic",
+                "font_bold": True,
+                "font_italic": False
+            }
+        )
+        item = TransformableShapeItem(s_data)
+        test_img = QImage(200, 200, QImage.Format.Format_ARGB32_Premultiplied)
+        p = QPainter(test_img)
+        opt = QStyleOptionGraphicsItem()
+        # Must not raise NameError or any exception!
+        item.paint(p, opt)
+        p.end()
+
+        # 2. Simulated paste in TextEditDialog and confirm via _create_text_at
+        pasted_content = "Line 1\n  Indented Line 2\nLine 3: 100% stable!"
+        with patch.object(TextEditDialog, 'exec', return_value=1):
+            with patch.object(TextEditDialog, 'get_properties', return_value={
+                "text": pasted_content,
+                "font_family": "Malgun Gothic",
+                "font_size": 24,
+                "font_bold": False,
+                "font_italic": False,
+                "color": QColor(0, 0, 0)
+            }):
+                self.cv._create_text_at(QPointF(30, 30))
+
+        # Check item added to scene and can be painted
+        self.assertTrue(any(isinstance(it, TransformableShapeItem) and it.shape_type == "text" for it in self.cv.scene.items()))
+
+    def test_context_menu_dismiss_does_not_open_text_editor(self):
+        """Verifies dismissing a shape context menu does NOT trigger text editor dialog callback."""
+        from unittest.mock import MagicMock, patch
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QContextMenuEvent
+        from PyQt6.QtCore import QPoint
+
+        s_data = ShapeItemData(
+            id="rect_shape",
+            shape_type="rect",
+            x=10,
+            y=10,
+            width=50,
+            height=50
+        )
+        item = TransformableShapeItem(s_data)
+        edit_text_mock = MagicMock()
+        item.on_edit_text_cb = edit_text_mock
+
+        ev = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(20, 20), QPoint(20, 20))
+        with patch.object(QMenu, 'exec', return_value=None):
+            item.contextMenuEvent(ev)
+
+        edit_text_mock.assert_not_called()
+
+    def test_drawing_shape_suppresses_context_menu(self):
+        """Verifies drawing shape with right-click suppresses context menu."""
+        from unittest.mock import MagicMock
+        from PyQt6.QtGui import QContextMenuEvent
+        from PyQt6.QtCore import QPoint
+
+        self.safety.current_mode = InputMode.SHAPE_RECT
+        self.cv.drag_start_pt = QPointF(10, 10)
+        release_ev = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            QPointF(50, 50),
+            Qt.MouseButton.RightButton,
+            Qt.MouseButton.RightButton,
+            Qt.KeyboardModifier.NoModifier
+        )
+        self.cv.mouseReleaseEvent(release_ev)
+
+        self.assertTrue(self.cv._suppress_context_menu)
+
+        ctx_ev = MagicMock(spec=QContextMenuEvent)
+        self.cv.contextMenuEvent(ctx_ev)
+        ctx_ev.accept.assert_called_once()
+        self.assertFalse(self.cv._suppress_context_menu)
+
+    def test_delete_selection_with_and_without_transparent_selection(self):
+        """Verifies deleting selection fills with secondary_color when transparent selection is off, and transparent when on, while preserving the selection marquee."""
+        active_layer = self.lm.get_active_layer()
+        active_layer.raster_image.fill(QColor(255, 0, 0, 255))  # Red canvas
+
+        # Secondary color = Green
+        self.cv.secondary_color = QColor(0, 255, 0, 255)
+
+        # 1. Transparent selection = False: Delete must fill with secondary_color (not delete sub-color)
+        self.cv.transparent_selection_enabled = False
+        self.cv.selection_rect = QRectF(10, 10, 20, 20)
+        self.cv.delete_selection()
+
+        # Selection rect MUST remain active (not cleared)
+        self.assertIsNotNone(self.cv.selection_rect)
+
+        pixel = active_layer.raster_image.pixelColor(15, 15)
+        self.assertEqual(pixel.red(), 0)
+        self.assertEqual(pixel.green(), 255)
+        self.assertEqual(pixel.blue(), 0)
+        self.assertEqual(pixel.alpha(), 255)
+
+        # 2. Transparent selection = True: Delete must clear to transparent (0, 0, 0, 0)
+        self.cv.transparent_selection_enabled = True
+        self.cv.delete_selection()
+
+        # Selection rect still remains
+        self.assertIsNotNone(self.cv.selection_rect)
+
+        pixel_trans = active_layer.raster_image.pixelColor(15, 15)
+        self.assertEqual(pixel_trans.alpha(), 0)
+
+    def test_delete_selected_content_shapes_and_shortcuts(self):
+        """Verifies delete_selected_content deletes image inside selection rect while keeping selection rect active."""
+        from ui.main_window import MainWindow
+
+        win = MainWindow()
+        try:
+            cv = win.canvas_view
+            active_layer = win.layer_manager.get_active_layer()
+            active_layer.raster_image.fill(QColor(255, 0, 0, 255))
+            cv.secondary_color = QColor(0, 0, 255, 255)
+            cv.transparent_selection_enabled = False
+            cv.selection_rect = QRectF(5, 5, 15, 15)
+
+            # Trigger global delete action
+            win._action_delete()
+
+            # Selection rect remains active (not deleted)
+            self.assertIsNotNone(cv.selection_rect)
+            # Image inside selection was deleted and filled with secondary color
+            px = active_layer.raster_image.pixelColor(10, 10)
+            self.assertEqual(px.blue(), 255)
+        finally:
+            win.close()
+
+    def test_delete_selection_with_shapes_and_shape_layer_active(self):
+        """Verifies deleting selection rect when shape layer is active correctly deletes both raster underneath and shapes inside."""
+        # 1. Background layer (red)
+        bg = self.lm.get_active_layer()
+        bg.raster_image.fill(QColor(255, 0, 0, 255))
+
+        # 2. Add shape and make shape layer active
+        s_data = ShapeItemData(id="test_del_rect", shape_type="rect", x=10, y=10, width=20, height=20)
+        shape_layer = self.lm.add_shape_to_default_layer(s_data)
+        item = self.cv._create_shape_graphics_item(s_data)
+        self.cv.shape_items[s_data.id] = item
+        self.assertEqual(self.lm.get_active_layer().id, shape_layer.id)
+
+        # 3. Select area containing the shape
+        self.cv.selection_rect = QRectF(5, 5, 30, 30)
+        self.cv.secondary_color = QColor(255, 255, 255, 255)
+        self.cv.transparent_selection_enabled = False
+
+        self.cv.delete_selection()
+
+        # Selection rect remains
+        self.assertIsNotNone(self.cv.selection_rect)
+        # Shape inside must be deleted
+        self.assertNotIn(s_data.id, self.cv.shape_items)
+        self.assertNotIn(item, self.cv.scene.items())
+        # Raster underneath must be filled with secondary color
+        px = bg.raster_image.pixelColor(15, 15)
+        self.assertEqual(px.red(), 255)
+        self.assertEqual(px.green(), 255)
+        self.assertEqual(px.blue(), 255)
+
 
 if __name__ == "__main__":
     unittest.main()
+

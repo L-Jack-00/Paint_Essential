@@ -24,6 +24,7 @@ class InputMode(Enum):
     EYEDROPPER = "eyedropper"
     MOSAIC = "mosaic"
     STEP_BADGE = "step_badge"
+    TEXT = "text"
     PAN = "pan"
 
 

@@ -5,7 +5,7 @@ LJack Protocol: Headless Regression Rig
 import unittest
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QPointF, QRect, QRectF
-from PyQt6.QtGui import QColor, QImage, QPixmap, QPainter, QKeySequence
+from PyQt6.QtGui import QColor, QImage, QPixmap, QPainter, QKeySequence, QShortcut
 
 from core.layer_manager import LayerManager, LayerType, ShapeItemData
 from core.history_manager import HistoryManager
@@ -155,8 +155,23 @@ class TestV6Fixes(unittest.TestCase):
         win = MainWindow()
         self.assertTrue(hasattr(win, "settings_act"))
         self.assertEqual(win.settings_act.shortcut().toString(), "F1")
+        # Global shortcut check
+        shortcuts = [s.key().toString() for s in win.findChildren(QShortcut)]
+        self.assertIn("F1", shortcuts)
+        win.close()
+
+    def test_issue7_status_message_does_not_overwrite_coord_label(self):
+        """Issue 7: Canvas status messages must show in status bar and NOT overwrite coord_label."""
+        win = MainWindow()
+        initial_coord = win.coord_label.text()
+        test_msg = "테스트 조작 안내 힌트"
+        win.canvas_view.status_message.emit(test_msg)
+        self.assertEqual(win.status_bar.currentMessage(), test_msg)
+        self.assertNotEqual(win.coord_label.text(), test_msg)
+        self.assertEqual(win.coord_label.text(), initial_coord)
         win.close()
 
 
 if __name__ == "__main__":
     unittest.main()
+

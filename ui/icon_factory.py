@@ -451,6 +451,13 @@ class IconFactory:
             p.setFont(font)
             p.drawText(QRectF(3, 2, s - 6, s - 6), Qt.AlignmentFlag.AlignCenter, "1")
 
+        elif icon_type in ("text", "shape_text"):
+            # Crisp letter "T" icon
+            font = QFont("Arial", int(s * 0.72), QFont.Weight.Bold)
+            p.setFont(font)
+            p.setPen(QPen(c_acc))
+            p.drawText(QRectF(0, 0, s, s), Qt.AlignmentFlag.AlignCenter, "T")
+
         elif icon_type == "trans_select":
             # Checkerboard layer icon for transparent selection
             for y in range(4, int(s - 4), 4):

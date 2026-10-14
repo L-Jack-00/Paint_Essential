@@ -6,7 +6,7 @@ empty patch notes (testing build), and credits (L.Jack with Google Antigravity).
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QRadioButton,
     QButtonGroup, QGroupBox, QTextEdit, QPushButton, QTabWidget,
-    QWidget, QFrame
+    QWidget, QFrame, QCheckBox
 )
 from PyQt6.QtCore import pyqtSignal
 from core.i18n import I18N
@@ -15,16 +15,19 @@ from core.i18n import I18N
 class SettingsDialog(QDialog):
     theme_changed = pyqtSignal(str)     # "light" or "dark"
     language_changed = pyqtSignal(str)  # "ko" or "en"
+    ghost_indicator_toggled = pyqtSignal(bool)
 
     def __init__(
         self,
         current_theme: str = "light",
         current_language: str = "ko",
+        ghost_indicator_enabled: bool = True,
         parent=None
     ):
         super().__init__(parent)
         self.current_theme = current_theme
         self.current_language = current_language
+        self.ghost_indicator_enabled = ghost_indicator_enabled
         I18N.set_language(current_language)
 
         self.resize(520, 460)
@@ -88,6 +91,16 @@ class SettingsDialog(QDialog):
         theme_layout.addWidget(self.theme_dark_rb)
         theme_layout.addStretch()
         gen_layout.addWidget(self.theme_group)
+
+        # Interaction / UX Group
+        self.ux_group = QGroupBox()
+        ux_layout = QVBoxLayout(self.ux_group)
+        ux_layout.setContentsMargins(12, 14, 12, 14)
+        self.ghost_indicator_check = QCheckBox()
+        self.ghost_indicator_check.setChecked(self.ghost_indicator_enabled)
+        self.ghost_indicator_check.toggled.connect(self._on_ghost_toggled)
+        ux_layout.addWidget(self.ghost_indicator_check)
+        gen_layout.addWidget(self.ux_group)
 
         gen_layout.addStretch()
         self.tabs.addTab(general_tab, "")
@@ -164,6 +177,12 @@ class SettingsDialog(QDialog):
         self.theme_light_rb.setText("☀️ " + I18N.tr("theme_light", lang))
         self.theme_dark_rb.setText("🌙 " + I18N.tr("theme_dark", lang))
 
+        if hasattr(self, "ux_group"):
+            self.ux_group.setTitle(I18N.tr("group_interaction", lang))
+        if hasattr(self, "ghost_indicator_check"):
+            self.ghost_indicator_check.setText(I18N.tr("opt_ghost_indicator", lang))
+            self.ghost_indicator_check.setToolTip(I18N.tr("tooltip_ghost_indicator", lang))
+
         self.title_lbl.setText("🎨 Paint Essential (페인트 에센셜)")
         self.sub_lbl.setText(I18N.tr("credits_sub_label", lang))
         author_label = I18N.tr("credits_author_label", lang)
@@ -198,3 +217,8 @@ class SettingsDialog(QDialog):
             self.theme_changed.emit(theme)
             from ui.theme_utils import apply_window_titlebar
             apply_window_titlebar(self, theme, deep_navy_hex="#0d1527")
+
+    def _on_ghost_toggled(self, checked: bool):
+        self.ghost_indicator_enabled = bool(checked)
+        self.ghost_indicator_toggled.emit(checked)
+
